@@ -141,8 +141,9 @@ settings, and nothing else.
 ## Previews from Deezer
 
 The songs, their titles, artists, covers and 30-second previews come from
-Deezer's public API (`/genre`, and `/chart/{genre}/tracks`, which need no
-key), and every reveal says "Previews from Deezer". The previews are
+Deezer's public API (`/genre`, `/chart/{genre}/tracks` and, for decades,
+the playlists of Deezer's editors, which need no key), with thanks to
+[Deezer](https://www.deezer.com) for them. The previews are
 Deezer's: the game downloads each one when it is played, cuts a clip from
 it, and posts the clip to the chat, keeping nothing of it once posted.
 Whether posting clips of Deezer's previews in a chat fits

@@ -640,7 +640,7 @@ func TestGame(t *testing.T) {
 	if len(page.Ops) != 2 {
 		t.Fatalf("song 1's reveal %+v", page)
 	}
-	want := "✅ **" + song1.Title + "** — " + song1.Artist + "\nTitle: {u_alice} ⚡\nArtist: {u_bob}\nPreviews from Deezer"
+	want := "✅ **" + song1.Title + "** — " + song1.Artist + "\nTitle: {u_alice} ⚡\nArtist: {u_bob}"
 	if o := page.Ops[0]; o.Op != "post" || o.Chat != chat || o.Text != want || o.ReplyTo != s1.ID || o.Audio != nil {
 		t.Errorf("reveal %+v\nwant %q as a reply to %s", o, want, s1.ID)
 	}
@@ -667,7 +667,7 @@ func TestGame(t *testing.T) {
 	clk.Advance(settle)
 	c.note()
 	page = c.outbox(page.Cursor)
-	want = "✅ **" + song2.Title + "** — " + song2.Artist + "\nTitle: {u_alice} ⚡, {u_bob}\nArtist: {u_alice}, {u_bob}\nPreviews from Deezer"
+	want = "✅ **" + song2.Title + "** — " + song2.Artist + "\nTitle: {u_alice} ⚡, {u_bob}\nArtist: {u_alice}, {u_bob}"
 	if len(page.Ops) != 2 || page.Ops[0].Text != want || page.Ops[0].ReplyTo != s2.ID {
 		t.Fatalf("song 2's early reveal %+v\nwant %q", page, want)
 	}
@@ -679,7 +679,7 @@ func TestGame(t *testing.T) {
 	c.note()
 	page = c.outbox(page.Cursor)
 	results := "🏁 **Song quiz over**\n🥇 {u_alice} 35 · 2/3 songs\n🥈 {u_bob} 20 · 2/3 songs"
-	if len(page.Ops) != 3 || !strings.Contains(page.Ops[0].Text, "\nNobody got it.\nPreviews from Deezer") || page.Ops[0].ReplyTo != s3.ID ||
+	if len(page.Ops) != 3 || !strings.Contains(page.Ops[0].Text, "\nNobody got it.") || page.Ops[0].ReplyTo != s3.ID ||
 		page.Ops[1].Text != results || page.Ops[1].ReplyTo != "" {
 		t.Fatalf("results %+v\nwant %q", page, results)
 	}
@@ -765,7 +765,7 @@ func TestEnd(t *testing.T) {
 	song := c.open()
 	c.reply(title(song), from(clk, chat, bob))
 	ended := words(c.song("end", from(clk, chat, alice)))
-	if !strings.HasPrefix(ended, "✅ **"+song.Title+"** — ") || !strings.HasSuffix(ended, "Title: {u_bob} ⚡\nPreviews from Deezer\n\n🏁 **Song quiz over**\n🥇 {u_bob} 15 · 1/1 songs") {
+	if !strings.HasPrefix(ended, "✅ **"+song.Title+"** — ") || !strings.HasSuffix(ended, "Title: {u_bob} ⚡\n\n🏁 **Song quiz over**\n🥇 {u_bob} 15 · 1/1 songs") {
 		t.Errorf("end: %q", ended)
 	}
 	c.note()
@@ -887,7 +887,7 @@ func TestRestart(t *testing.T) {
 		t.Fatalf("ops %+v", page)
 	}
 	checkSong(t, page.Ops[0], 1, 3)
-	if o := page.Ops[1]; o.ReplyTo != page.Ops[0].ID || !strings.HasSuffix(o.Text, "\nTitle: {u_alice} ⚡\nArtist: {u_bob}\nPreviews from Deezer") || len(o.Images) != 0 {
+	if o := page.Ops[1]; o.ReplyTo != page.Ops[0].ID || !strings.HasSuffix(o.Text, "\nTitle: {u_alice} ⚡\nArtist: {u_bob}") || len(o.Images) != 0 {
 		t.Errorf("song 1's reveal %+v", o)
 	}
 	checkSong(t, page.Ops[2], 2, 3)

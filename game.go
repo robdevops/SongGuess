@@ -30,7 +30,6 @@ const (
 	badClip     = "A clip can be 1s to 25s long, such as /song rock 10s."
 	notYet      = "Wait for the next song."
 	tooLate     = "Too late for that song."
-	credit      = "Previews from Deezer"
 )
 
 // usage is the help for /song.
@@ -490,8 +489,7 @@ func (s *server) revealOp(g *game) addon.Op {
 }
 
 // mark scores g's open song and returns its reveal: the title and artist,
-// who got each, as {u_…} placeholders, the first marked ⚡, and Deezer's
-// credit. s.mu is held.
+// who got each, as {u_…} placeholders, the first marked ⚡. s.mu is held.
 func (s *server) mark(g *game) string {
 	t := g.Songs[g.Current]
 	type right struct {
@@ -557,7 +555,6 @@ func (s *server) mark(g *game) string {
 			fmt.Fprintf(&b, " and %d more", more)
 		}
 	}
-	b.WriteString("\n" + credit)
 	return b.String()
 }
 
