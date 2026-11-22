@@ -278,7 +278,7 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 	s.games[c.Chat] = g
 	s.media[g.ID] = map[int]media{0: m}
 	if c.Group && s.srv.WatchReactions() { // players join by reacting to the intro first
-		g.Lobby, g.Joined, g.CallOff = true, []string{c.Sender}, now.Add(lobbyMax)
+		g.Lobby, g.Joined, g.CallOff = true, nil, now.Add(lobbyMax)
 		g.End = g.End.Add(lobbyMax)
 		s.armLobby(g)
 	} else {
@@ -376,7 +376,7 @@ func intro(g *game) string {
 	}
 	join, early := "", "From song 2 on, a song ends as soon as everyone who answered song 1 has answered."
 	if g.Lobby {
-		join = "👋 **React to this message with any emoji to join.** You're in if you started it: the game starts 30 seconds after the next player joins, or after the last one if more join.\n"
+		join = "👋 **React to this message with any emoji to join**, whoever started it too: the game starts 30 seconds after the last player joins, once at least 2 have.\n"
 		early = "A song ends as soon as everyone who joined has answered."
 	}
 	return fmt.Sprintf("%s · %d %s%s, %s clips, %s to answer each.\n%s"+
@@ -747,7 +747,7 @@ func (s *server) answer(c *addon.Context, msg string) addon.Result {
 }
 
 // reacted is a reaction to the game's messages: in the lobby, a player
-// joining, or leaving if removed (the starter stays); after it, nothing.
+// joining, or leaving if removed; after it, nothing.
 func (s *server) reacted(c *addon.Context, removed bool) addon.Result {
 	if !fromChat(c) {
 		return addon.Text(noChat)
@@ -763,7 +763,7 @@ func (s *server) reacted(c *addon.Context, removed bool) addon.Result {
 	case !removed && !in:
 		g.Joined = append(g.Joined, c.Sender)
 		g.LastJoin = s.clock.Now()
-	case removed && in && c.Sender != g.Starter:
+	case removed && in:
 		g.Joined = slices.DeleteFunc(g.Joined, func(u string) bool { return u == c.Sender })
 	default:
 		s.mu.Unlock()

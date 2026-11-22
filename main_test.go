@@ -1421,11 +1421,16 @@ func TestLobby(t *testing.T) {
 	c := connect(t, testServer(t, t.TempDir(), clk, logs, d.srv.URL))
 	c.initializeWith(true, true)
 	r := c.song("2", from(clk, chat, alice))
-	if !strings.Contains(words(r), "React to this message with any emoji to join.") || !strings.Contains(words(r), "You're in if you started it") || !r.Meta.Watch.Reactions || !strings.HasSuffix(r.Meta.Watch.Over, "is over. Start another with /song.") {
+	if !strings.Contains(words(r), "React to this message with any emoji to join") || !strings.Contains(words(r), "whoever started it too") || !r.Meta.Watch.Reactions || !strings.HasSuffix(r.Meta.Watch.Over, "is over. Start another with /song.") {
 		t.Fatalf("intro %+v", r)
 	}
 	if rr := c.reply("anything", from(clk, chat, bob)); words(rr) != "The song quiz hasn't started yet." {
 		t.Errorf("an answer in the lobby: %q", words(rr))
+	}
+	c.react(false, from(clk, chat, alice)) // the starter joins too, but alone doesn't start it
+	clk.Advance(lobbyWait)
+	if p := c.outbox("0"); len(p.Ops) != 0 {
+		t.Fatalf("started with one player: %+v", p)
 	}
 	clk.Advance(5 * time.Second)
 	c.react(false, from(clk, chat, bob))
