@@ -253,7 +253,7 @@ type rpcIn struct {
 // in logs, using Deezer at api; extra settings come from env.
 func testServer(t *testing.T, dir string, clk clock, logs io.Writer, api string, env ...string) *server {
 	t.Helper()
-	vars := map[string]string{"SONGS_STATE_DIR": dir, "SONGS_DEEZER": api}
+	vars := map[string]string{"SONGS_STATE_DIR": dir, "SONGS_DEEZER": api, "SONGS_TIME": "30s"} // the tests were written for 30s; TestConfig checks the default
 	for i := 0; i+1 < len(env); i += 2 {
 		vars[env[i]] = env[i+1]
 	}
@@ -1269,7 +1269,7 @@ func TestConfig(t *testing.T) {
 		return func(k string) string { return m[k] }
 	}
 	c, err := loadConfig(env())
-	if err != nil || c.Songs != 5 || c.Time != 30*time.Second || c.MemLimit != 64<<20 || c.Deezer != "https://api.deezer.com" || c.gap != gapTime {
+	if err != nil || c.Songs != 5 || c.Time != 35*time.Second || c.MemLimit != 64<<20 || c.Deezer != "https://api.deezer.com" || c.gap != gapTime {
 		t.Errorf("defaults %+v %v", c, err)
 	}
 	c, err = loadConfig(env("SONGS_SONGS", "8", "SONGS_TIME", "1m", "SONGS_MEMLIMIT", "1GiB", "SONGS_DEEZER", "http://127.0.0.1:9/"))

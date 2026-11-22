@@ -31,7 +31,7 @@ const (
 	defaultSongs    = 5
 	minTime         = 10 * time.Second
 	maxTime         = 2 * time.Minute
-	defaultTime     = 30 * time.Second
+	defaultTime     = 35 * time.Second
 	defaultMemLimit = "64MiB"
 	deezerURL       = "https://api.deezer.com"
 )

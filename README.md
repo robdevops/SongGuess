@@ -149,7 +149,7 @@ settings, and nothing else.
 |---|---|---|
 | `SONGS_STATE_DIR` | signalbot's `addons/songs` | Where the game keeps `songs.json` and its log. Created, mode 700, if missing; the game exits at start if it can't create, list and write it |
 | `SONGS_SONGS` | `5` | A game's songs when `/song` doesn't say, 1 to 10 |
-| `SONGS_TIME` | `30s` | The time to answer each song, 10s to 2m |
+| `SONGS_TIME` | `35s` | The time to answer each song, 10s to 2m |
 | `SONGS_MEMLIMIT` | `64MiB` | Memory limit, applied with `debug.SetMemoryLimit`, written as `GOMEMLIMIT` is (`B`, `KiB`, `MiB`, `GiB`, `TiB`) |
 | `SONGS_DEEZER` | `https://api.deezer.com` | Deezer's API, for testing against another server |
 | `SONGS_ANY_LANGUAGE` | `false` | `true` plays songs in any language; otherwise only songs sung mainly in English, as the bot's model judges them when a game starts (one request), or, without the model, songs whose title and artist are in Latin script |
