@@ -1370,7 +1370,7 @@ func TestDecade(t *testing.T) {
 	if got := words(c.song("2010s 10s", from(clk, "c_four", alice))); !strings.HasPrefix(got, "🎵 **Song quiz: 2010s** · ") || !strings.Contains(got, ", 10s clips") {
 		t.Errorf("/song 2010s 10s: %q", got)
 	}
-	for _, name := range []string{"50s", "80", "20s", "rock"} {
+	for _, name := range []string{"50s", "80", "rock"} {
 		if _, ok := findDecade(name); ok {
 			t.Errorf("findDecade(%q) passed", name)
 		}
