@@ -119,6 +119,38 @@ func unique(names ...string) []string {
 // by ABBA"), so a list of guesses, or chat that happens to hold a short
 // title ("no one knows"), doesn't score.
 func matches(reply string, names []string) bool {
+	return matchesWithin(reply, names, 0)
+}
+
+// mark is which of t's title and artist reply names. A reply that names
+// both may be as long as the two together plus 4 words, so "do you
+// believe in love cher" names Believe and Cher; one that names only one is
+// held to that name's own limit, so a list of guesses still doesn't score.
+func mark(reply string, t track) (title, artist bool) {
+	titles, artists := titleNames(t), artistNames(t)
+	title, artist = matches(reply, titles), matches(reply, artists)
+	if title && artist {
+		return true, true
+	}
+	both := longest(titles) + longest(artists) + 4
+	if matchesWithin(reply, titles, both) && matchesWithin(reply, artists, both) {
+		return true, true
+	}
+	return title, artist
+}
+
+// longest is the most words in any of names, normalised.
+func longest(names []string) int {
+	n := 0
+	for _, name := range names {
+		n = max(n, len(strings.Fields(normalize(name))))
+	}
+	return n
+}
+
+// matchesWithin is matches, with runs of words searched in a reply of at
+// most limit words; 0 is the name's own words plus 4.
+func matchesWithin(reply string, names []string, limit int) bool {
 	got := normalize(reply)
 	if got == "" {
 		return false
@@ -133,7 +165,7 @@ func matches(reply string, names []string) bool {
 			return true
 		}
 		k := len(strings.Fields(want))
-		if len(words) > k+4 {
+		if lim := cmp.Or(limit, k+4); len(words) > lim {
 			continue // a long reply must match whole
 		}
 		short := utf8.RuneCountInString(want) < 5

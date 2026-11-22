@@ -1125,6 +1125,7 @@ func TestMarking(t *testing.T) {
 	feat := track{Title: "Stay ft. Justin Bieber", Artist: "The Kid LAROI feat. Justin Bieber"}
 	weeknd := track{Title: "Blinding Lights", Artist: "The Weeknd"}
 	flowers := track{Title: "Flowers", Artist: "Miley Cyrus"}
+	believe := track{Title: "Believe", Artist: "Cher"}
 	stay := track{Title: "Stay", Artist: "Rihanna"}
 	one := track{Title: "One", Artist: "U2"}
 	x := track{Title: "Marks", Artist: "X"}
@@ -1178,6 +1179,9 @@ func TestMarking(t *testing.T) {
 		{weeknd, "the weeknd", false, true},
 		{flowers, "stay hello flowers love go yes", false, false},
 		{flowers, "flowers by miley", true, false},
+		{believe, "do you believe in love cher", true, true}, // long, but names both
+		{believe, "do you believe in love today", false, false},
+		{believe, "do you believe", true, false},
 		{stay, "I'll stay out of this one", false, false},
 		{one, "no one knows", false, false},
 		{one, "one", true, false},
@@ -1190,7 +1194,7 @@ func TestMarking(t *testing.T) {
 		{ewf, "earth wind and fire", false, true},
 		{florence, "machine", false, false},
 	} {
-		if gt, ga := matches(tc.reply, titleNames(tc.t)), matches(tc.reply, artistNames(tc.t)); gt != tc.title || ga != tc.artist {
+		if gt, ga := mark(tc.reply, tc.t); gt != tc.title || ga != tc.artist {
 			t.Errorf("%q for %q by %q: title %v, artist %v", tc.reply, tc.t.Title, tc.t.Artist, gt, ga)
 		}
 	}
