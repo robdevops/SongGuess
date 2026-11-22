@@ -76,11 +76,15 @@ type game struct {
 	Post     string            `json:"post"`    // the outbox op that posted it, for the reveal to reply to; "" until then
 	Opened   time.Time         `json:"opened"`  // when it was posted, or is due to be
 	Deadline time.Time         `json:"deadline"`
-	Answers  map[string]answer `json:"answers"` // the open song's, by player
-	Players  []string          `json:"players"` // who answered song 1: a later song ends once they all have
-	Seq      int               `json:"seq"`     // the answers recorded so far, to break ties
-	Points   map[string]int    `json:"points"`  // by player
-	Right    map[string]int    `json:"right"`   // songs with something right, by player
+	Answers  map[string]answer `json:"answers"`            // the open song's, by player
+	Players  []string          `json:"players"`            // who joined, or else who answered song 1: a song ends once they all have
+	Lobby    bool              `json:"lobby,omitempty"`    // waiting for players to join by reacting to the intro
+	Joined   []string          `json:"joined,omitempty"`   // who has joined, the starter first
+	LastJoin time.Time         `json:"lastJoin,omitempty"` // when the last player joined: the game starts lobbyWait after
+	CallOff  time.Time         `json:"callOff,omitempty"`  // when the lobby gives up with fewer than minPlayers
+	Seq      int               `json:"seq"`                // the answers recorded so far, to break ties
+	Points   map[string]int    `json:"points"`             // by player
+	Right    map[string]int    `json:"right"`              // songs with something right, by player
 }
 
 // answer is what one player's last answer to the open song got right, and
@@ -127,6 +131,11 @@ const (
 	// lateSlack is how late a song may be posted before it no longer fits
 	// within the watch.
 	lateSlack = 5 * time.Second
+	// The lobby: how long after the last join the game starts, the players
+	// it needs, and how long it waits for them.
+	lobbyWait  = 30 * time.Second
+	minPlayers = 2
+	lobbyMax   = 5 * time.Minute
 	// fetchSlack is the time a game allows, in all, for songs that aren't
 	// ready when they are due.
 	fetchSlack = 30 * time.Second
@@ -183,6 +192,8 @@ func newServer(cfg config, clk clock, rnd *mrand.Rand, client *http.Client, logg
 		}
 		s.games[g.Chat] = g
 		switch {
+		case g.Lobby:
+			s.armLobby(g)
 		case g.Post == "": // its song wasn't posted yet: fetch it again, and post it when due
 			s.scheduleAsk(g)
 		case !s.clock.Now().Before(g.Deadline.Add(settle)):

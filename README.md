@@ -28,6 +28,15 @@ public API needs none.
 
 ## How to play
 
+- **Joining.** In a group, `/song` starts with a lobby: react to its intro
+  with any emoji to join (take the reaction back to leave). The game starts
+  30 seconds after the last player joins, once there are at least 2 of you,
+  and is called off if fewer than 2 have joined after 5 minutes; whoever
+  starts it has joined. In a DM it starts at once. Those who joined are the
+  players every song waits for; anyone may still answer. On Telegram the
+  bot sees reactions only as the group's admin; a bot older than signalbot
+  fe51891 starts the game at once.
+
 - **Always answer by replying** to the song's message (or any of the game's
   messages: a reply counts for the song that is open). That works on every
   network, and on Telegram whatever the bot's privacy mode.

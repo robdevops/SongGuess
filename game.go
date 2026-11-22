@@ -81,10 +81,15 @@ func (s *server) tools() []addon.Tool {
 			Visibility:  []string{"bot"},
 			Call: func(_ context.Context, c *addon.Context, raw json.RawMessage) (addon.Result, error) {
 				var a struct {
-					Text string `json:"text"`
+					Text     string `json:"text"`
+					Reaction string `json:"reaction"` // a reaction to the game's messages: a join, in the lobby
+					Removed  bool   `json:"removed"`
 				}
 				if err := addon.DecodeArgs(raw, &a); err != nil {
 					return addon.Result{}, err
+				}
+				if a.Reaction != "" {
+					return s.reacted(c, a.Removed), nil
 				}
 				return s.answer(c, a.Text), nil
 			},
@@ -265,7 +270,13 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 	}
 	s.games[c.Chat] = g
 	s.media[g.ID] = map[int]media{0: m}
-	s.tryPost(g)
+	if c.Group && s.srv.WatchReactions() { // players join by reacting to the intro first
+		g.Lobby, g.Joined, g.CallOff = true, []string{c.Sender}, now.Add(lobbyMax)
+		g.End = g.End.Add(lobbyMax)
+		s.armLobby(g)
+	} else {
+		s.tryPost(g)
+	}
 	text := intro(g)
 	s.mu.Unlock()
 	s.save()
@@ -273,7 +284,7 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 	return addon.Result{
 		Content: addon.Text(clamp(text, maxPost)).Content,
 		Meta: &addon.ResultMeta{Watch: &addon.Watch{
-			ID: g.ID, Replies: true, Until: g.End.Add(watchSlack).Format(time.RFC3339), Tool: "song_answer",
+			ID: g.ID, Replies: true, Reactions: g.Lobby, Until: g.End.Add(watchSlack).Format(time.RFC3339), Tool: "song_answer",
 		}},
 	}
 }
@@ -341,12 +352,17 @@ func intro(g *game) string {
 	if g.Asked > g.Count {
 		short = fmt.Sprintf(" (that's all the chart has that hasn't been played here lately, of the %d asked for)", g.Asked)
 	}
-	return fmt.Sprintf("%s · %d %s%s, %s clips, %s to answer each.\n"+
+	join, early := "", "From song 2 on, a song ends as soon as everyone who answered song 1 has answered."
+	if g.Lobby {
+		join = fmt.Sprintf("👋 **React to this message with any emoji to join.** The game starts 30 seconds after the last player joins, once there are at least %d of you.\n", minPlayers)
+		early = "A song ends as soon as everyone who joined has answered."
+	}
+	return fmt.Sprintf("%s · %d %s%s, %s clips, %s to answer each.\n%s"+
 		"**Reply** to each clip with the title or the artist, or both, such as \"Title by Artist\": "+
 		"%d points for the title, %d for the artist, and %d more for the first to get either. "+
-		"Your last answer before time is up counts. From song 2 on, a song ends as soon as everyone who answered song 1 has answered.",
-		title, g.Count, plural(g.Count, "song", "songs"), short, lengthLabel(g.Clip), lengthLabel(g.Time),
-		titlePoints, artistPoints, firstBonus)
+		"Your last answer before time is up counts. %s",
+		title, g.Count, plural(g.Count, "song", "songs"), short, lengthLabel(g.Clip), lengthLabel(g.Time), join,
+		titlePoints, artistPoints, firstBonus, early)
 }
 
 // songText is the open song's post.
@@ -380,7 +396,7 @@ func lengthLabel(d time.Duration) string {
 // s.mu is held.
 func (s *server) tryPost(g *game) {
 	now := s.clock.Now()
-	if g.Post != "" || now.Before(g.Opened) {
+	if g.Lobby || g.Post != "" || now.Before(g.Opened) {
 		return
 	}
 	m, ok := s.media[g.ID][g.Current]
@@ -435,7 +451,7 @@ func (s *server) timeUp(chat, id string, current int) {
 // and the end of the watch. s.mu is held.
 func (s *server) revealLocked(g *game) {
 	now := s.clock.Now()
-	if g.Current == 0 {
+	if g.Current == 0 && len(g.Players) == 0 { // no lobby: song 1's players are the game's
 		g.Players = slices.Sorted(maps.Keys(g.Answers))
 	}
 	reveal := s.revealOp(g)
@@ -571,6 +587,11 @@ func (s *server) finish(c *addon.Context) addon.Result {
 	case g.Starter != c.Sender:
 		s.mu.Unlock()
 		return addon.Text("Only the player who started this song quiz can end it.")
+	case g.Lobby:
+		s.callOffLocked(g, "")
+		s.mu.Unlock()
+		s.save()
+		return addon.Text("The song quiz is off.")
 	}
 	revealed := ""
 	if g.Post != "" { // the open song was posted: reveal it first
@@ -660,6 +681,9 @@ func (s *server) answer(c *addon.Context, msg string) addon.Result {
 	case g == nil:
 		s.mu.Unlock()
 		return addon.Text(noGame)
+	case g.Lobby:
+		s.mu.Unlock()
+		return addon.Text("The song quiz hasn't started yet.")
 	case c.Sent > 0 && c.Sent < g.Started.Unix():
 		s.mu.Unlock()
 		return addon.Text("That message is from before this song quiz.")
@@ -692,10 +716,92 @@ func (s *server) answer(c *addon.Context, msg string) addon.Result {
 	return addon.Text("Recorded.")
 }
 
+// reacted is a reaction to the game's messages: in the lobby, a player
+// joining, or leaving if removed (the starter stays); after it, nothing.
+func (s *server) reacted(c *addon.Context, removed bool) addon.Result {
+	if !fromChat(c) {
+		return addon.Text(noChat)
+	}
+	s.mu.Lock()
+	g := s.games[c.Chat]
+	if g == nil || !g.Lobby {
+		s.mu.Unlock()
+		return addon.Text("Noted.")
+	}
+	in := slices.Contains(g.Joined, c.Sender)
+	switch {
+	case !removed && !in:
+		g.Joined = append(g.Joined, c.Sender)
+		g.LastJoin = s.clock.Now()
+	case removed && in && c.Sender != g.Starter:
+		g.Joined = slices.DeleteFunc(g.Joined, func(u string) bool { return u == c.Sender })
+	default:
+		s.mu.Unlock()
+		return addon.Text("Noted.")
+	}
+	s.armLobby(g)
+	s.mu.Unlock()
+	s.save()
+	return addon.Text("Noted.")
+}
+
+// armLobby sets g's lobby timer: with enough players, to start lobbyWait
+// after the last join; else to call the game off at CallOff. s.mu is held.
+func (s *server) armLobby(g *game) {
+	at := g.CallOff
+	if len(g.Joined) >= minPlayers {
+		at = g.LastJoin.Add(lobbyWait)
+	}
+	chat, id := g.Chat, g.ID
+	if t := s.timers[chat]; t != nil {
+		t.Stop()
+	}
+	s.timers[chat] = s.clock.AfterFunc(max(at.Sub(s.clock.Now()), 0), func() {
+		s.mu.Lock()
+		g := s.games[chat]
+		if g == nil || g.ID != id || !g.Lobby {
+			s.mu.Unlock()
+			return
+		}
+		now := s.clock.Now()
+		switch {
+		case len(g.Joined) >= minPlayers && !now.Before(g.LastJoin.Add(lobbyWait)):
+			g.Lobby, g.Players = false, slices.Clone(g.Joined)
+			g.Started, g.Opened = now, now
+			s.log.Printf("game %s began: %d players", g.ID, len(g.Players))
+			s.tryPost(g)
+		case len(g.Joined) < minPlayers && !now.Before(g.CallOff):
+			s.callOffLocked(g, "Not enough players joined, so the song quiz is off.")
+		default:
+			s.armLobby(g)
+		}
+		s.mu.Unlock()
+		s.save()
+	})
+}
+
+// callOffLocked ends g in its lobby, saying why if why isn't "", and ends
+// its watch. s.mu is held.
+func (s *server) callOffLocked(g *game, why string) {
+	if why != "" {
+		s.queue(addon.Op{Op: "post", Chat: g.Chat, Text: why})
+	}
+	s.queue(addon.Op{Op: "unwatch", Chat: g.Chat, Watch: g.ID})
+	delete(s.games, g.Chat)
+	delete(s.media, g.ID)
+	for _, m := range []map[string]stopper{s.timers, s.asks} {
+		if t := m[g.Chat]; t != nil {
+			t.Stop()
+			delete(m, g.Chat)
+		}
+	}
+	s.log.Printf("game %s called off in its lobby: %d joined", g.ID, len(g.Joined))
+}
+
 // allAnswered reports whether a song after the first has an answer from
 // each player of song 1, and is still before its deadline. s.mu is held.
 func (s *server) allAnswered(g *game) bool {
-	if g.Current == 0 || len(g.Players) == 0 || !s.clock.Now().Before(g.Deadline) {
+	if len(g.Players) == 0 || !s.clock.Now().Before(g.Deadline) { // none yet, before the end of song 1, without a lobby
 		return false
 	}
 	for _, p := range g.Players {

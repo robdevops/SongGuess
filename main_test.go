@@ -399,7 +399,14 @@ func (c *client) result(method string, params any, v any) {
 // its subscription to the outbox.
 func (c *client) initialize(replies bool) {
 	c.t.Helper()
-	caps := map[string]any{"experimental": map[string]any{vendor + "addon": map[string]any{"version": 1, "network": "signal", "watchReplies": replies}}}
+	c.initializeWith(replies, false)
+}
+
+// initializeWith is initialize, offering reactions on a watch too, as a
+// bot at signalbot fe51891 does.
+func (c *client) initializeWith(replies, reactions bool) {
+	c.t.Helper()
+	caps := map[string]any{"experimental": map[string]any{vendor + "addon": map[string]any{"version": 1, "network": "signal", "watchReplies": replies, "watchReactions": reactions}}}
 	var init initializeResult
 	c.result("initialize", map[string]any{
 		"protocolVersion": protocolVersion, "clientInfo": map[string]string{"name": "signalbot", "version": "1"},
@@ -429,6 +436,16 @@ func (c *client) tool(name string, args map[string]string, ctx callContext) tool
 func (c *client) song(args string, ctx callContext) toolResult {
 	c.t.Helper()
 	return c.tool("song", map[string]string{"args": args}, ctx)
+}
+
+// react is a reaction to the game's messages, as the bot passes it.
+func (c *client) react(removed bool, ctx callContext) {
+	c.t.Helper()
+	var r toolResult
+	c.result("tools/call", map[string]any{
+		"name": "song_answer", "arguments": map[string]any{"reaction": "👍", "removed": removed},
+		"_meta": map[string]any{vendor + "context": ctx},
+	}, &r)
 }
 
 func (c *client) reply(text string, ctx callContext) toolResult {
@@ -1374,5 +1391,53 @@ func TestDecade(t *testing.T) {
 		if _, ok := findDecade(name); ok {
 			t.Errorf("findDecade(%q) passed", name)
 		}
+	}
+}
+
+// In a group, with a bot that passes reactions, players join by reacting
+// to the intro; song 1 comes 30s after the last join once there are 2;
+// fewer than 2 after 5 minutes calls the game off; a DM starts at once.
+func TestLobby(t *testing.T) {
+	clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+	logs := &syncBuffer{}
+	d := newFakeDeezer(t)
+	c := connect(t, testServer(t, t.TempDir(), clk, logs, d.srv.URL))
+	c.initializeWith(true, true)
+	r := c.song("2", from(clk, chat, alice))
+	if !strings.Contains(words(r), "React to this message with any emoji to join.") || !r.Meta.Watch.Reactions {
+		t.Fatalf("intro %+v", r)
+	}
+	if rr := c.reply("anything", from(clk, chat, bob)); words(rr) != "The song quiz hasn't started yet." {
+		t.Errorf("an answer in the lobby: %q", words(rr))
+	}
+	clk.Advance(5 * time.Second)
+	c.react(false, from(clk, chat, bob))
+	clk.Advance(29 * time.Second)
+	if p := c.outbox("0"); len(p.Ops) != 0 {
+		t.Fatalf("a song before the lobby ended: %+v", p)
+	}
+	clk.Advance(time.Second)
+	c.note()
+	page := c.outbox("0")
+	if len(page.Ops) != 1 || page.Ops[0].Audio == nil {
+		t.Fatalf("song 1 %+v", page)
+	}
+	c.s.mu.Lock()
+	if p := c.s.games[chat].Players; !slices.Equal(p, []string{alice, bob}) {
+		t.Errorf("players %v", p)
+	}
+	c.s.mu.Unlock()
+
+	c.song("2", from(clk, "c_two", alice))
+	clk.Advance(lobbyMax)
+	c.note()
+	p := c.outbox(page.Cursor) // the first chat's game goes on meanwhile; the call-off is last
+	if n := len(p.Ops); n < 2 || p.Ops[n-2].Chat != "c_two" || p.Ops[n-2].Text != "Not enough players joined, so the song quiz is off." || p.Ops[n-1].Op != "unwatch" {
+		t.Errorf("call-off %+v", p)
+	}
+	dm := from(clk, "c_dm", alice)
+	dm.Group = false
+	if got := words(c.song("2", dm)); strings.Contains(got, "React to") {
+		t.Errorf("a DM has a lobby: %q", got)
 	}
 }
