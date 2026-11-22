@@ -244,43 +244,23 @@ var decades = []decade{
 	{"90s", 878989033}, {"2000s", 248297032}, {"2010s", 14917741483},
 }
 
-// findDecade is the decade name names, written with its century or an
-// apostrophe, so it is never a length: 1980s, 1980's, 80's or '80s, or a
-// word such as eighties; ok false for anything else, 80s included.
+// findDecade is the decade name names: 80s, 80's, 1980s, eighties, or ok
+// false.
 func findDecade(name string) (decade, bool) {
-	n := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(name), "’", "'"))
-	words := map[string]string{"sixties": "1960s", "seventies": "1970s", "eighties": "1980s", "nineties": "1990s", "noughties": "2000s"}
+	n := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(name), "'", ""), "’", ""))
+	words := map[string]string{"sixties": "60s", "seventies": "70s", "eighties": "80s", "nineties": "90s", "noughties": "2000s", "00s": "2000s", "10s": "2010s"}
 	if w, ok := words[n]; ok {
 		n = w
 	}
-	switch {
-	case len(n) == 6 && n[4:] == "'s": // 1980's
-		n = n[:4] + "s"
-	case len(n) == 4 && (n[2:] == "'s" || n[0] == '\''): // 80's, '80s
-		n = strings.ReplaceAll(n, "'", "")
-		century := "19"
-		if n[0] == '0' || n[0] == '1' {
-			century = "20"
-		}
-		n = century + n
-	}
-	if len(n) != 5 || n[4] != 's' || n[3] != '0' || strings.Trim(n[:4], "0123456789") != "" {
-		return decade{}, false
+	if len(n) == 5 && strings.HasPrefix(n, "19") {
+		n = n[2:] // 1980s
 	}
 	for _, d := range decades {
-		if d.full() == n {
+		if d.Label == n {
 			return d, true
 		}
 	}
 	return decade{}, false
-}
-
-// full is the decade with its century: 1980s.
-func (d decade) full() string {
-	if strings.HasPrefix(d.Label, "20") {
-		return d.Label
-	}
-	return "19" + d.Label
 }
 
 // Decade is a decade's hits: its editors' playlist, or, if that is gone

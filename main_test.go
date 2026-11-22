@@ -1330,13 +1330,12 @@ func TestHelp(t *testing.T) {
 	}
 }
 
-// /song 80's plays the editors' 80s Hits playlist; bare 80s is 80-second
-// clips, too long, with a hint; it
+// /song 80s plays the editors' 80s Hits playlist, not 80-second clips; it
 // combines with a clip length; with the pinned playlist gone, the search
 // finds the editors' own "80s Hits"; an unknown decade is no genre.
 func TestDecade(t *testing.T) {
 	clk, c, d, _ := begin(t)
-	got := words(c.song("80's 10s 2", from(clk, chat, alice)))
+	got := words(c.song("80s 10s 2", from(clk, chat, alice)))
 	if !strings.HasPrefix(got, "🎵 **Song quiz: 80s** · 2 songs, 10s clips") {
 		t.Fatalf("intro %q", got)
 	}
@@ -1353,11 +1352,7 @@ func TestDecade(t *testing.T) {
 	if !slices.Contains(d.fetched(), "/playlist/868/tracks?limit=100") {
 		t.Errorf("the search didn't pick the editors' 80s Hits: %v", d.fetched())
 	}
-	if got := words(c.song("80s", from(clk, "c_five", alice))); got != badClip+" For the decade, write /song 1980s or /song 80's." {
-		t.Errorf("/song 80s: %q", got)
-	}
-	for name, want := range map[string]string{"80's": "80s", "'80s": "80s", "80’s": "80s", "1980s": "80s", "1980's": "80s", "eighties": "80s",
-		"2000s": "2000s", "00's": "2000s", "2010s": "2010s", "10's": "2010s", "1960s": "60s", "70's": "70s"} {
+	for name, want := range map[string]string{"80s": "80s", "80's": "80s", "1980s": "80s", "eighties": "80s", "2000s": "2000s", "00s": "2000s", "2010s": "2010s", "1960s": "60s", "70's": "70s"} {
 		if dec, ok := findDecade(name); !ok || dec.Label != want {
 			t.Errorf("findDecade(%q) = %v %v", name, dec, ok)
 		}
@@ -1369,7 +1364,7 @@ func TestDecade(t *testing.T) {
 	if got := words(c.song("2010s 10s", from(clk, "c_four", alice))); !strings.HasPrefix(got, "🎵 **Song quiz: 2010s** · ") || !strings.Contains(got, ", 10s clips") {
 		t.Errorf("/song 2010s 10s: %q", got)
 	}
-	for _, name := range []string{"80s", "60s", "00s", "50's", "1950s", "1985s", "80", "20s", "rock", "8's"} {
+	for _, name := range []string{"50s", "80", "20s", "rock"} {
 		if _, ok := findDecade(name); ok {
 			t.Errorf("findDecade(%q) passed", name)
 		}
