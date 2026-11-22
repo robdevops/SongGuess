@@ -231,7 +231,9 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 			return failed(err)
 		}
 	}
-	pool := s.pick(c.Chat, chart, n)
+	pool := s.pick(c.Chat, chart, 3*n+poolExtra) // more than needed: some may not be in English
+	pool = s.english(gctx, c.Chat, pool)
+	pool = pool[:min(len(pool), n+poolExtra)]
 	if len(pool) == 0 {
 		if len(chart) == 0 {
 			return addon.Text(noSongs)

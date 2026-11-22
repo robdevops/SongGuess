@@ -2,9 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
+	"unicode"
+
+	"github.com/robdevops/signalbot/addon"
 )
 
 // The limits of making songs ready: the tracks a game keeps to try, the
@@ -190,4 +195,67 @@ func (s *server) prunePlayed(now time.Time) {
 			s.played[chat] = list
 		}
 	}
+}
+
+// english is tracks, in order, without those not sung mainly in English:
+// the bot's model decides, as Deezer doesn't say a track's language; without
+// it, or if it fails, only tracks whose title or artist is in a script other
+// than Latin are dropped. With SONGS_ANY_LANGUAGE, tracks as they are.
+func (s *server) english(ctx context.Context, chat string, tracks []track) []track {
+	if s.cfg.Anyway || len(tracks) == 0 {
+		return tracks
+	}
+	latin := slices.DeleteFunc(slices.Clone(tracks), func(t track) bool { return !isLatin(t.Title) || !isLatin(t.Artist) })
+	if !s.srv.CanSample() || len(latin) == 0 {
+		return latin
+	}
+	type item struct {
+		ID     int    `json:"id"`
+		Title  string `json:"title"`
+		Artist string `json:"artist"`
+	}
+	var items []item
+	for i, t := range latin {
+		items = append(items, item{i + 1, t.Title, t.Artist})
+	}
+	body, _ := json.Marshal(items)
+	zero := 0.0
+	ctx, cancel := context.WithTimeout(ctx, judgeTimeout)
+	defer cancel()
+	res, err := s.srv.Sample(ctx, chat, addon.SampleRequest{
+		SystemPrompt: `You know popular music. For each track below, decide whether its lyrics are sung mainly in English. An instrumental, or a song mainly in another language, is not. Reply with JSON only, no other text: {"english":[1,3]}, the ids of the English ones.`,
+		MaxTokens:    judgeTokens, Temperature: &zero,
+		Messages: []addon.SampleMessage{{Role: "user", Content: addon.Content{Type: "text", Text: string(body)}}},
+	})
+	if err != nil {
+		s.log.Printf("choosing English songs failed, by script instead: %v", errClass(err))
+		return latin
+	}
+	text := res.Content.Text
+	i, j := strings.Index(text, "{"), strings.LastIndex(text, "}")
+	var r struct {
+		English []int `json:"english"`
+	}
+	if i < 0 || j < i || json.Unmarshal([]byte(text[i:j+1]), &r) != nil {
+		s.log.Printf("choosing English songs failed, by script instead: no usable reply")
+		return latin
+	}
+	var out []track
+	for k, t := range latin {
+		if slices.Contains(r.English, k+1) {
+			out = append(out, t)
+		}
+	}
+	s.log.Printf("songs in English: %d of %d", len(out), len(latin))
+	return out
+}
+
+// isLatin reports whether every letter of s is in the Latin script.
+func isLatin(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) && !unicode.Is(unicode.Latin, r) {
+			return false
+		}
+	}
+	return true
 }

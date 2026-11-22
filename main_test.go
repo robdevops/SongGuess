@@ -21,6 +21,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/robdevops/signalbot/addon"
 )
 
 // fakeClock is a clock whose time moves only when a test says.
@@ -1489,6 +1491,9 @@ func TestJudge(t *testing.T) {
 	c.judge = func(params json.RawMessage) string {
 		var p sampleRequest
 		json.Unmarshal(params, &p)
+		if strings.Contains(p.SystemPrompt, "sung mainly in English") { // choosing the songs: all are
+			return englishAll(p.Messages[0].Content.Text)
+		}
 		mu.Lock()
 		asked = append(asked, p.Messages[0].Content.Text)
 		defer mu.Unlock()
@@ -1549,5 +1554,36 @@ func waitFor(t *testing.T, s *server, what string, ok func() bool) {
 		if time.Now().After(deadline) {
 			t.Fatalf("waited for %s", what)
 		}
+	}
+}
+
+// englishAll is the model's answer to which tracks are in English: all of
+// those it was given.
+func englishAll(list string) string {
+	var items []struct {
+		ID int `json:"id"`
+	}
+	json.Unmarshal([]byte(list), &items)
+	var ids []int
+	for _, it := range items {
+		ids = append(ids, it.ID)
+	}
+	b, _ := json.Marshal(map[string][]int{"english": ids})
+	return string(b)
+}
+
+// Only songs in English are played: the model picks them, as Deezer
+// doesn't say a song's language; without the model, a title or artist in
+// another script is dropped; SONGS_ANY_LANGUAGE plays any.
+func TestEnglishOnly(t *testing.T) {
+	ts := []track{{ID: 1, Title: "Hello", Artist: "Adele"}, {ID: 2, Title: "Despacito", Artist: "Luis Fonsi"}, {ID: 3, Title: "다이너마이트", Artist: "BTS"}}
+	s := &server{cfg: config{}, log: log.New(io.Discard, "", 0)}
+	s.srv = addon.New(addon.Config{Name: "songs"}) // no sampling offered: by script
+	if got := s.english(context.Background(), chat, ts); len(got) != 2 || got[0].ID != 1 || got[1].ID != 2 {
+		t.Errorf("by script %v", got)
+	}
+	s.cfg.Anyway = true
+	if got := s.english(context.Background(), chat, ts); len(got) != 3 {
+		t.Errorf("any language %v", got)
 	}
 }

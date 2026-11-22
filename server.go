@@ -76,9 +76,9 @@ type game struct {
 	Post     string            `json:"post"`    // the outbox op that posted it, for the reveal to reply to; "" until then
 	Opened   time.Time         `json:"opened"`  // when it was posted, or is due to be
 	Deadline time.Time         `json:"deadline"`
-	Answers  map[string]answer `json:"answers"`            // the open song's, by player
-	Players  []string          `json:"players"`            // who joined, or else who answered song 1: a song ends once they all have
-	Lobby    bool              `json:"lobby,omitempty"`    // waiting for players to join by reacting to the intro
+	Answers  map[string]answer `json:"answers"`         // the open song's, by player
+	Players  []string          `json:"players"`         // who joined, or else who answered song 1: a song ends once they all have
+	Lobby    bool              `json:"lobby,omitempty"` // waiting for players to join by reacting to the intro
 	judging  bool              // the model is judging the open song's answers
 	Joined   []string          `json:"joined,omitempty"`   // who has joined, the starter first
 	LastJoin time.Time         `json:"lastJoin,omitempty"` // when the last player joined: the game starts lobbyWait after

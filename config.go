@@ -20,6 +20,7 @@ type config struct {
 	Time     time.Duration // SONGS_TIME: the time to answer each song
 	MemLimit int64         // SONGS_MEMLIMIT, in bytes
 	Deezer   string        // SONGS_DEEZER: the Deezer API's base URL, without a final /
+	Anyway   bool          // SONGS_ANY_LANGUAGE: songs in any language, not only English
 	gap      time.Duration // between a song's reveal and the next song: gapTime, not a setting; 0 in most tests
 }
 
@@ -44,6 +45,7 @@ func loadConfig(getenv func(string) string) (config, error) {
 		Time:     defaultTime,
 		Deezer:   strings.TrimRight(cmp.Or(strings.TrimSpace(getenv("SONGS_DEEZER")), deezerURL), "/"),
 		gap:      gapTime,
+		Anyway:   strings.EqualFold(strings.TrimSpace(getenv("SONGS_ANY_LANGUAGE")), "true"),
 	}
 	var errs []error
 	if c.StateDir == "" {

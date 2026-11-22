@@ -28,6 +28,12 @@ public API needs none.
 
 ## How to play
 
+- **Songs in English only**, unless `SONGS_ANY_LANGUAGE` is `true`. Deezer
+  doesn't say a song's language, so when a game starts the bot's model
+  picks the English ones from the chart; without the `model` permission,
+  only songs titled in another script (such as Korean or Japanese) are
+  left out.
+
 - **Joining.** In a group, `/song` starts with a lobby: react to its intro
   with any emoji to join (take the reaction back to leave). The game starts
   30 seconds after the last player joins, once there are at least 2 of you,
@@ -146,6 +152,7 @@ settings, and nothing else.
 | `SONGS_TIME` | `30s` | The time to answer each song, 10s to 2m |
 | `SONGS_MEMLIMIT` | `64MiB` | Memory limit, applied with `debug.SetMemoryLimit`, written as `GOMEMLIMIT` is (`B`, `KiB`, `MiB`, `GiB`, `TiB`) |
 | `SONGS_DEEZER` | `https://api.deezer.com` | Deezer's API, for testing against another server |
+| `SONGS_ANY_LANGUAGE` | `false` | `true` plays songs in any language; otherwise only songs sung mainly in English, as the bot's model judges them when a game starts (one request), or, without the model, songs whose title and artist are in Latin script |
 
 ## Previews from Deezer
 
