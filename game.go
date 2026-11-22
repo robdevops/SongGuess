@@ -320,14 +320,14 @@ func (s *server) genreList(ctx context.Context) string {
 	if err != nil || genreNames(genres, len(genres)) == "" {
 		return unreachable
 	}
-	return "🎵 **Genres:** " + genreNames(genres, len(genres)) + ".\n**Decades:** " + decadeNames() + ".\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart."
+	return "🎵 **Genres:** " + genreNames(genres, len(genres)) + ".\n**Decades:** " + decadeNames() + " (or 80's for short).\nPlay one with, say, /song rock or /song 1980s; plain /song plays the main chart."
 }
 
 // decadeNames are the decades /song plays, as it takes them.
 func decadeNames() string {
 	var names []string
 	for _, d := range decades {
-		names = append(names, d.Label)
+		names = append(names, d.full())
 	}
 	return strings.Join(names, ", ")
 }
