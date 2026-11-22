@@ -294,18 +294,12 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 
 // helpText is /song help: every command, with the defaults in use.
 func (s *server) helpText() string {
-	return fmt.Sprintf("🎵 **Song quiz**: guess a song from a short clip, by replying with its title or artist.\n"+
-		"/song — %d %s from the main chart, %s clips\n"+
-		"/song rock — a genre's chart; names match loosely (rap, hiphop, rnb)\n"+
-		"/song 80s — a decade's hits: 60s, 70s, 80s, 90s, 2000s, 2010s, 2020s (also 80's, 1980s, eighties)\n"+
-		"/song rock 10s 3 — a clip length (1s to 25s) and a number of songs (1 to 10), after the genre or decade, in either order\n"+
-		"/song 80s 10s — the 80s with 10s clips: a bare 10s or 20s is always a clip length; for those decades, say 2010s or 2020s\n"+
-		"Answer by replying to each clip with the title, the artist, or both (\"Believe by Cher\").\n"+
-		"/song genres — the genres and decades\n"+
-		"/song end — finish now (only whoever started it)\n"+
-		"/song scores — this chat's totals over the last 7 days\n"+
-		"Each song: %s to answer. The title %d points, the artist %d, and %d more for the first right.",
-		s.cfg.Songs, plural(s.cfg.Songs, "song", "songs"), lengthLabel(clipLength), lengthLabel(s.cfg.Time), titlePoints, artistPoints, firstBonus)
+	return fmt.Sprintf("🎵 **Song quiz**: reply to each clip with the title or artist.\n"+
+		"/song [genre or decade] [clip length] [songs]\n"+
+		"e.g. /song, /song rock, /song 80s 10s 3\n"+
+		"/song genres — what you can pick\n"+
+		"/song end · /song scores\n"+
+		"Title %d pts, artist %d, first right +%d.", titlePoints, artistPoints, firstBonus)
 }
 
 // unknownGenre is the answer to /song with a genre Deezer hasn't, naming

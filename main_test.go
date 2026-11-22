@@ -1342,12 +1342,15 @@ func TestFewerThanAsked(t *testing.T) {
 
 // /song help names every command and the defaults in use.
 func TestHelp(t *testing.T) {
-	clk, c, _, _ := begin(t, "SONGS_TIME", "45s", "SONGS_SONGS", "3")
+	clk, c, _, _ := begin(t)
 	got := words(c.song("help", from(clk, chat, alice)))
-	for _, want := range []string{"/song — 3 songs from the main chart, 5s clips", "/song rock —", "/song rock 10s 3 —", "/song 80s 10s —", "/song 80s —", "/song genres —", "/song end —", "/song scores —", "45s to answer", "10 points"} {
+	for _, want := range []string{"/song [genre or decade] [clip length] [songs]", "/song 80s 10s 3", "/song genres", "/song end", "/song scores", "Title 10 pts"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help lacks %q:\n%s", want, got)
 		}
+	}
+	if n := strings.Count(got, "\n") + 1; n > 6 {
+		t.Errorf("help is %d lines", n)
 	}
 }
 
