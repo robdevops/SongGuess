@@ -111,7 +111,7 @@ func (s *server) command(ctx context.Context, c *addon.Context, args string) add
 	fields := strings.Fields(args)
 	if len(fields) == 1 {
 		switch strings.ToLower(fields[0]) {
-		case "end":
+		case "end", "stop":
 			return s.finish(c)
 		case "scores":
 			return addon.Text(s.scoreboard(c.Chat))
@@ -305,7 +305,7 @@ func (s *server) helpText() string {
 		"/song [genre or decade] [clip length] [rounds]\n"+
 		"e.g. /song, /song rock, /song 80s 10s 3\n"+
 		"/song genres — what you can pick\n"+
-		"/song end · /song scores\n"+
+		"/song end (or stop) · /song scores\n"+
 		"Title %d pts, artist %d, first right +%d.", titlePoints, artistPoints, firstBonus)
 }
 

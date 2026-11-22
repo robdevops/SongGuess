@@ -781,7 +781,7 @@ func TestLateAndEdited(t *testing.T) {
 // song and the results at once, and queues the unwatch alone.
 func TestEnd(t *testing.T) {
 	clk, c, _, _ := begin(t)
-	if got := words(c.song("end", from(clk, chat, alice))); got != noGame {
+	if got := words(c.song("stop", from(clk, chat, alice))); got != noGame {
 		t.Errorf("end with no game: %q", got)
 	}
 	c.song("", from(clk, chat, alice))
