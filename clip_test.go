@@ -41,7 +41,7 @@ func TestClip(t *testing.T) {
 	src := mp3(1150) // about 30s
 	starts := map[byte]bool{}
 	for seed := range uint64(20) {
-		c, err := clip(src, rand.New(rand.NewPCG(seed, 1)))
+		c, err := clip(src, clipLength, rand.New(rand.NewPCG(seed, 1)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -66,8 +66,41 @@ func TestClip(t *testing.T) {
 		t.Errorf("the clip starts at only %d places", len(starts))
 	}
 	for name, b := range map[string][]byte{"junk": bytes.Repeat([]byte("junk"), 5000), "short": mp3(100), "empty": nil} {
-		if _, err := clip(b, rand.New(rand.NewPCG(1, 1))); err == nil {
+		if _, err := clip(b, clipLength, rand.New(rand.NewPCG(1, 1))); err == nil {
 			t.Errorf("%s clipped", name)
+		}
+	}
+}
+
+// /song 10s asks for a longer clip, which is as long; a 25s clip fits a
+// 30s preview, and a length that doesn't fit is refused.
+func TestClipLength(t *testing.T) {
+	src := mp3(1150)
+	for _, want := range []time.Duration{time.Second, 10 * time.Second, maxClip} {
+		c, err := clip(src, want, rand.New(rand.NewPCG(7, 1)))
+		if err != nil {
+			t.Fatalf("%s: %v", want, err)
+		}
+		var total time.Duration
+		for i := 0; i < len(c); {
+			size, dur, _ := parseFrame(c[i:])
+			i, total = i+size, total+dur
+		}
+		if total < want || total > want+30*time.Millisecond {
+			t.Errorf("asked %s, got %s", want, total)
+		}
+	}
+	if _, err := clip(src, 31*time.Second, rand.New(rand.NewPCG(7, 1))); err == nil {
+		t.Error("a clip longer than the preview")
+	}
+	for s, want := range map[string]time.Duration{"10s": 10 * time.Second, "25S": maxClip, "1s": time.Second} {
+		if d, err := clipArg(s); err != nil || d != want {
+			t.Errorf("clipArg(%q) = %s, %v", s, d, err)
+		}
+	}
+	for _, s := range []string{"0s", "26s", "2.5s", "1m", "ten", ""} {
+		if _, err := clipArg(s); err == nil {
+			t.Errorf("clipArg(%q) passed", s)
 		}
 	}
 }

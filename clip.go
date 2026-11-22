@@ -3,12 +3,29 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/rand/v2"
+	"strings"
 	"time"
 )
 
-// clipLength is how much of a preview the game plays.
-const clipLength = 5 * time.Second
+// How much of a preview the game plays: by default, and the least and
+// most /song 10s may ask for, within a 30-second preview.
+const (
+	clipLength = 5 * time.Second
+	minClip    = time.Second
+	maxClip    = 25 * time.Second
+)
+
+// clipArg reads a clip length such as 10s, from minClip to maxClip, in
+// whole seconds.
+func clipArg(s string) (time.Duration, error) {
+	d, err := time.ParseDuration(strings.ToLower(s))
+	if err != nil || d < minClip || d > maxClip || d%time.Second != 0 {
+		return 0, fmt.Errorf("%q isn't a clip length: use 1s to 25s, such as /song 10s", s)
+	}
+	return d, nil
+}
 
 // errNotMP3 refuses audio that isn't MPEG audio with enough good frames.
 var errNotMP3 = errors.New("not an MP3 long enough to clip")
@@ -116,19 +133,19 @@ func frames(b []byte) []frame {
 	return out
 }
 
-// clip is a random clipLength of audio, an MP3, cut at frame edges and
+// clip is a random length of audio, an MP3, cut at frame edges and
 // without tags. The first frame of the cut is dropped, as it may lean on
 // audio before it.
-func clip(audio []byte, r *rand.Rand) ([]byte, error) {
+func clip(audio []byte, length time.Duration, r *rand.Rand) ([]byte, error) {
 	b := stripTags(audio)
 	fs := frames(b)
 	n := 0 // frames in a clip
 	var total time.Duration
-	for n < len(fs) && total < clipLength {
+	for n < len(fs) && total < length {
 		total += fs[n].dur
 		n++
 	}
-	if total < clipLength || len(fs) < n+1 {
+	if total < length || len(fs) < n+1 {
 		return nil, errNotMP3
 	}
 	start := 1 + r.IntN(len(fs)-n) // after one frame to drop
