@@ -9,10 +9,11 @@ import (
 // The protocol as the tests, playing the bot, read and write it. The
 // server's side is github.com/robdevops/signalbot/addon.
 type (
-	callContext = addon.Context
-	toolResult  = addon.Result
-	outboxPage  = addon.Page
-	outboxOp    = addon.Op
+	callContext   = addon.Context
+	toolResult    = addon.Result
+	outboxPage    = addon.Page
+	outboxOp      = addon.Op
+	sampleRequest = addon.SampleRequest
 )
 
 const (

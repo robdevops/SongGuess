@@ -232,6 +232,9 @@ type client struct {
 	waiting map[string]chan response
 	lines   int
 	closed  bool
+	// judge, if set, answers the server's sampling requests, as the bot's
+	// model would, with the text it returns for the request's params.
+	judge func(params json.RawMessage) string
 }
 
 // rpcIn is a message as the client reads it.
@@ -308,6 +311,11 @@ func (c *client) read(r io.Reader) {
 			case c.notes <- m.Method:
 			default:
 			}
+		case m.Method == "sampling/createMessage" && len(m.ID) > 0 && c.judge != nil:
+			text := c.judge(m.Params)
+			res, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m.ID,
+				"result": map[string]any{"role": "assistant", "content": map[string]string{"type": "text", "text": text}, "model": "x/test-model"}})
+			go c.send(string(res))
 		case m.Method != "":
 			c.t.Errorf("the server asked %s", m.Method)
 		case len(m.ID) > 0 && (m.Error == nil) != (len(m.Result) == 0):
@@ -1463,5 +1471,83 @@ func TestDMEndsEarly(t *testing.T) {
 	c.note()
 	if p := c.outbox(page.Cursor); len(p.Ops) == 0 || p.Ops[0].ReplyTo == "" {
 		t.Errorf("song 1 waited for its timer: %+v", p)
+	}
+}
+
+// With the bot's model, the model judges each answer at the reveal: its
+// verdicts replace the fuzzy match's, both ways; the answers it gets are
+// numbered in the order sent; without a usable reply, the fuzzy match
+// stands.
+func TestJudge(t *testing.T) {
+	clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+	logs := &syncBuffer{}
+	d := newFakeDeezer(t)
+	c := connect(t, testServer(t, t.TempDir(), clk, logs, d.srv.URL))
+	var mu sync.Mutex
+	var asked []string
+	reply := `{"answers":[{"id":1,"title":true,"artist":true},{"id":2,"title":false,"artist":false}]}`
+	c.judge = func(params json.RawMessage) string {
+		var p sampleRequest
+		json.Unmarshal(params, &p)
+		mu.Lock()
+		asked = append(asked, p.Messages[0].Content.Text)
+		defer mu.Unlock()
+		return reply
+	}
+	caps := map[string]any{"experimental": map[string]any{vendor + "addon": map[string]any{"version": 1, "watchReplies": true}}, "sampling": map[string]any{}}
+	c.result("initialize", map[string]any{"protocolVersion": protocolVersion, "capabilities": caps}, new(initializeResult))
+	c.send(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	c.result("resources/subscribe", uriParams{outboxURI}, new(struct{}))
+	dm := func(user string) callContext { ctx := from(clk, chat, user); ctx.Group = false; return ctx }
+	c.song("2", dm(alice))
+	waitFor(t, c.s, "song 1", func() bool { g := c.s.games[chat]; return g != nil && g.Post != "" })
+	c.s.mu.Lock()
+	song := c.s.games[chat].Songs[0]
+	c.s.mu.Unlock()
+	c.reply("something misspelt", dm(bob))            // the model says right
+	c.reply(song.Title+" by "+song.Artist, dm(alice)) // the fuzzy match says right; the model, wrong
+	clk.Advance(settle)
+	waitFor(t, c.s, "the reveal", func() bool { g := c.s.games[chat]; return g == nil || g.Current == 1 })
+	mu.Lock()
+	if len(asked) != 1 || !strings.Contains(asked[0], `"answers":[{"id":1,"text":"something misspelt"},{"id":2,"text":"`) {
+		t.Errorf("asked %q", asked)
+	}
+	mu.Unlock()
+	page := c.outbox("0")
+	var reveal string
+	for _, o := range page.Ops {
+		if o.ReplyTo != "" {
+			reveal = o.Text
+		}
+	}
+	if !strings.Contains(reveal, "Title: {u_bob} ⚡") || !strings.Contains(reveal, "Artist: {u_bob}") || strings.Contains(reveal, "{u_alice}") {
+		t.Errorf("reveal %q", reveal)
+	}
+	for _, secret := range []string{"misspelt", song.Title} {
+		if strings.Contains(logs.String(), secret) {
+			t.Errorf("the log holds %q", secret)
+		}
+	}
+	if v, err := parseVerdicts("```json\n" + reply + "\n```"); err != nil || len(v) != 2 || !v[0].Artist {
+		t.Errorf("parseVerdicts %v %v", v, err)
+	}
+	if _, err := parseVerdicts("sure!"); err == nil {
+		t.Error("no JSON parsed")
+	}
+}
+
+// waitFor waits, up to 5s, until ok holds under s.mu.
+func waitFor(t *testing.T, s *server, what string, ok func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		s.mu.Lock()
+		done := ok()
+		s.mu.Unlock()
+		if done {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("waited for %s", what)
+		}
 	}
 }

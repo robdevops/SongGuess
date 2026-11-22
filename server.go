@@ -79,6 +79,7 @@ type game struct {
 	Answers  map[string]answer `json:"answers"`            // the open song's, by player
 	Players  []string          `json:"players"`            // who joined, or else who answered song 1: a song ends once they all have
 	Lobby    bool              `json:"lobby,omitempty"`    // waiting for players to join by reacting to the intro
+	judging  bool              // the model is judging the open song's answers
 	Joined   []string          `json:"joined,omitempty"`   // who has joined, the starter first
 	LastJoin time.Time         `json:"lastJoin,omitempty"` // when the last player joined: the game starts lobbyWait after
 	CallOff  time.Time         `json:"callOff,omitempty"`  // when the lobby gives up with fewer than minPlayers
@@ -92,6 +93,7 @@ type game struct {
 type answer struct {
 	Title  bool      `json:"title"`
 	Artist bool      `json:"artist"`
+	Text   string    `json:"text,omitempty"` // what they replied, for the model to judge at the reveal; dropped with the song
 	At     time.Time `json:"at"`
 	Seq    int       `json:"seq"`
 }

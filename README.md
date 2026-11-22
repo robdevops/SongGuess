@@ -41,15 +41,14 @@ public API needs none.
   messages: a reply counts for the song that is open). That works on every
   network, and on Telegram whatever the bot's privacy mode.
 - **Name the title, the artist, or both** in one reply, such as
-  `Bohemian Rhapsody by Queen` or `queen - bohemian rhapsody`. Case,
-  accents, punctuation, "a", "an" and "the" don't matter, and `&` is "and".
-  A small slip is forgiven: one letter in a name of 5 to 9 letters, two in
-  one of 10 or more; numbers must be exact. A title's version ("Remastered
-  2011", "Radio Edit", anything in parentheses or after " - ") and featured
-  artists aren't needed, but an artist's whole name is (`Simon & Garfunkel`,
-  not `Garfunkel`). A name of 5 or more letters may sit among a few other
-  words; a shorter one (`One`, `ABBA`) must start or end the reply, and a
-  long reply listing many guesses names nothing.
+  `Bohemian Rhapsody by Queen`. When a song ends, the bot's model judges
+  every answer, the title and the artist separately, as a friendly quiz host
+  would: misspellings, "wanna" for "want to", word order and the like are
+  fine; a different song, a list of guesses or unrelated chat isn't. The
+  model needs the addon block's `model` permission (below); without it, or
+  if it fails, a stricter built-in match decides: case, accents and
+  punctuation don't matter, one or two letters may be wrong, and a long
+  reply listing guesses names nothing.
 - **Your last answer before time is up counts.** To change it, edit your
   reply, or reply again; a new reply replaces the old one, so give the title
   and the artist in the same one. Answers get no reaction.
@@ -99,7 +98,8 @@ below:
   "chat_commands": {"song": {"tool": "song", "direct": true, "example": "/song rock", "timeout": "60s"}},
   "addon": {
     "chats": ["<group id>"],
-    "post": true, "watch": true
+    "post": true, "watch": true,
+    "model": {"per_hour": 120, "max_tokens": 600}
   }
 }
 ```
@@ -167,7 +167,10 @@ chat and sender as pseudonyms and the time the bot got it. It never sees a
 phone number, account ID, group ID or, unless `names` is set, a display
 name; it writes players as `{u_…}` and the bot puts their names in.
 Replies are claimed by the bot, so they are never answered, sent to the
-model or kept in the chat's history.
+model or kept in the chat's history. With the `model` permission, each
+song's answers (what players replied, without their names or pseudonyms),
+its title and its artist go to the bot's model to be judged, charged to
+the chat's daily budget, one request a song.
 
 Deezer sees the game's requests: the genre asked for, from the bot's
 address, and nothing about the chat or its players.
@@ -179,9 +182,9 @@ address, and nothing about the chat or its players.
 - open games: the chat's pseudonym, who started it, the genre, the tracks
   chosen (Deezer's ID, title, artist and the preview's and cover's URLs),
   the open song's deadline, and for each player (a per-chat pseudonym) only
-  whether their answer to the open song named the title and the artist and
-  when they sent it, and their points so far; and who answered song 1.
-  What anyone replied is never kept, in memory or on disk;
+  their answer to the open song (its text, for the model to judge, until
+  the song ends), whether it named the title and the artist and when they
+  sent it, and their points so far; and who is playing;
 - 7 days of points per chat, by player pseudonym;
 - 30 days of the tracks played in each chat, by Deezer's ID, to avoid
   repeats;
