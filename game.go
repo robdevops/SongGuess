@@ -275,6 +275,9 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 		g.End = g.End.Add(lobbyMax)
 		s.armLobby(g)
 	} else {
+		if !c.Group { // a DM: its one player, so no song waits for the timer
+			g.Players = []string{c.Sender}
+		}
 		s.tryPost(g)
 	}
 	text := intro(g)

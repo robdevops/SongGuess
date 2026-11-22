@@ -1441,3 +1441,20 @@ func TestLobby(t *testing.T) {
 		t.Errorf("a DM has a lobby: %q", got)
 	}
 }
+
+// In a DM the starter is the one player: a song ends as soon as they
+// answer, from song 1.
+func TestDMEndsEarly(t *testing.T) {
+	clk, c, _, _ := begin(t)
+	dm := from(clk, "c_dm", alice)
+	dm.Group = false
+	c.song("2", dm)
+	c.note()
+	page := c.outbox("0")
+	c.reply("no idea", dm)
+	clk.Advance(settle)
+	c.note()
+	if p := c.outbox(page.Cursor); len(p.Ops) == 0 || p.Ops[0].ReplyTo == "" {
+		t.Errorf("song 1 waited for its timer: %+v", p)
+	}
+}
