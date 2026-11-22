@@ -346,7 +346,7 @@ func findGenre(genres []genre, name string) (genre, bool) {
 	}
 	squash := func(s string) string { return strings.ReplaceAll(s, " ", "") }
 	for _, g := range genres {
-		if n := normalize(g.Name); n == want || squash(n) == squash(want) {
+		if n := normalize(g.Name); n == want || squash(n) == squash(want) || normalize(genreLabel(g)) == want {
 			return g, true
 		}
 	}

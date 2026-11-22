@@ -1591,14 +1591,17 @@ func TestEnglishOnly(t *testing.T) {
 // Films/Games is shown as games, found by game or video games, and played
 // as video game music.
 func TestGamesGenre(t *testing.T) {
-	genres := []genre{{0, "All"}, {132, "Pop"}, {173, "Films/Games"}}
-	if got := genreNames(genres, 10); got != "pop, games" {
+	genres := []genre{{0, "All"}, {132, "Pop"}, {173, "Films/Games"}, {197, "Latin Music"}}
+	if got := genreNames(genres, 10); got != "pop, games, latin" {
 		t.Errorf("names %q", got)
 	}
 	for _, name := range []string{"games", "game", "video games", "videogame"} {
 		if g, ok := findGenre(genres, name); !ok || g.ID != gamesGenre {
 			t.Errorf("findGenre(%q) = %v %v", name, g, ok)
 		}
+	}
+	if g, ok := findGenre(genres, "latin"); !ok || g.ID != 197 || genreLabel(g) != "Latin" {
+		t.Errorf("latin: %v %v", g, ok)
 	}
 	if genreLabel(genres[2]) != "Games" {
 		t.Error("label")

@@ -321,10 +321,14 @@ func unknownGenre(genres []genre) string {
 // game music only.
 const gamesGenre = 173
 
-// genreLabel is g's name as the game shows it: Films/Games is Games.
+// genreLabel is g's name as the game shows it: Films/Games is Games, and
+// "Latin Music" is Latin.
 func genreLabel(g genre) string {
 	if g.ID == gamesGenre {
 		return "Games"
+	}
+	if label := strings.TrimSuffix(g.Name, " Music"); label != "" {
+		return label
 	}
 	return g.Name
 }
