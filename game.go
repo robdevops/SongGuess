@@ -130,15 +130,16 @@ func (s *server) command(ctx context.Context, c *addon.Context, args string) add
 			fields = fields[:len(fields)-1]
 			continue
 		}
-		if _, isDecade := findDecade(last); isDecade { // /song 80s: a decade, not 80 seconds; 10s is a clip length
-			if _, err := clipArg(last); err != nil {
-				break
-			}
+		if _, isDecade := findDecade(last); isDecade { // /song 1980s or 80's: a decade
+			break
 		}
 		if !gotClip && startsWithDigit(last) {
 			if _, err := time.ParseDuration(strings.ToLower(last)); err == nil {
 				d, err := clipArg(last)
 				if err != nil {
+					if dec, ok := findDecade("19" + strings.ToLower(last)); ok { // /song 80s: too long a clip; perhaps the decade
+						return addon.Text(badClip + " For the decade, write /song " + dec.full() + " or /song " + strings.TrimSuffix(dec.Label, "s") + "'s.")
+					}
 					return addon.Text(badClip)
 				}
 				length, gotClip = d, true
@@ -284,7 +285,7 @@ func (s *server) helpText() string {
 	return fmt.Sprintf("🎵 **Song quiz**: guess a song from a short clip, by replying with its title or artist.\n"+
 		"/song — %d %s from the main chart, %s clips\n"+
 		"/song rock — a genre's chart; names match loosely (rap, hiphop, rnb)\n"+
-		"/song 80s — a decade's hits: 60s, 70s, 80s, 90s, 2000s, 2010s\n"+
+		"/song 1980s or /song 80's — a decade's hits, the 1960s to the 2010s\n"+
 		"/song rock 10s 3 — a clip length (1s to 25s) and a number of songs (1 to 10), at the end, in either order\n"+
 		"/song genres — the genres and decades\n"+
 		"/song end — finish now (only whoever started it)\n"+
