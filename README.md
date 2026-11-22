@@ -25,7 +25,7 @@ It is a separate program that signalbot starts as an
 extension, through signalbot's own Go package for addons,
 [`github.com/robdevops/signalbot/addon`](https://github.com/robdevops/signalbot/tree/main/addon),
 and no other MCP library. It uses the bot's model, through MCP sampling and
-with the `model` permission, to judge answers and to keep English (or game)
+with the `model` permission, to judge answers and to keep English
 music, and holds no API key: Deezer's public API needs none.
 
 ## How to play
@@ -192,7 +192,7 @@ model or kept in the chat's history. With the `model` permission, each
 song's answers (what players replied, without their names or pseudonyms),
 its title and its artist go to the bot's model to be judged, one request a
 song; and when a game starts, the titles and artists of the chart's
-tracks, to keep English (or game) music, one request. Both are charged to
+tracks, to keep English music, one request. Both are charged to
 the chat's daily budget.
 
 Deezer sees the game's requests: the genre asked for, from the bot's
