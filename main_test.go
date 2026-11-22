@@ -1069,7 +1069,7 @@ func TestArgs(t *testing.T) {
 		"polka":     "I don't know that genre. Try one of: pop, rock, rap/hip hop, r&b, or /song genres for them all.",
 		"genres":    "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\nPlay one with, say, /song rock; plain /song plays the main chart.",
 		"GENRE":     "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\nPlay one with, say, /song rock; plain /song plays the main chart.",
-		"help":      usage,
+		"help":      c.s.helpText(),
 	} {
 		if got := words(c.song(args, from(clk, chat, alice))); got != want {
 			t.Errorf("%q: %q", args, got)
@@ -1307,5 +1307,16 @@ func TestFewerThanAsked(t *testing.T) {
 	got := words(c.song("hip hop 5", from(clk, chat, alice)))
 	if !strings.Contains(got, " · 2 songs (that's all the chart has that hasn't been played here lately, of the 5 asked for), ") {
 		t.Errorf("intro %q", got)
+	}
+}
+
+// /song help names every command and the defaults in use.
+func TestHelp(t *testing.T) {
+	clk, c, _, _ := begin(t, "SONGS_TIME", "45s", "SONGS_SONGS", "3")
+	got := words(c.song("help", from(clk, chat, alice)))
+	for _, want := range []string{"/song — 3 songs from the main chart, 5s clips", "/song rock —", "/song rock 10s 3 —", "/song genres —", "/song end —", "/song scores —", "45s to answer", "10 points"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("help lacks %q:\n%s", want, got)
+		}
 	}
 }

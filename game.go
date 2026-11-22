@@ -34,7 +34,7 @@ const (
 )
 
 // usage is the help for /song.
-const usage = "Try /song, /song rock, /song pop 10s 3, /song end or /song scores."
+const usage = "Try /song, /song rock, /song pop 10s 3, /song genres, /song end, /song scores, or /song help."
 
 // Points for the title and the artist, and the bonus for the first player
 // with either right.
@@ -112,7 +112,7 @@ func (s *server) command(ctx context.Context, c *addon.Context, args string) add
 		case "scores":
 			return addon.Text(s.scoreboard(c.Chat))
 		case "help":
-			return addon.Text(usage)
+			return addon.Text(s.helpText())
 		case "genre", "genres":
 			return addon.Text(s.genreList(ctx))
 		}
@@ -264,6 +264,19 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 			ID: g.ID, Replies: true, Until: g.End.Add(watchSlack).Format(time.RFC3339), Tool: "song_answer",
 		}},
 	}
+}
+
+// helpText is /song help: every command, with the defaults in use.
+func (s *server) helpText() string {
+	return fmt.Sprintf("🎵 **Song quiz**: guess a song from a short clip, by replying with its title or artist.\n"+
+		"/song — %d %s from the main chart, %s clips\n"+
+		"/song rock — a genre's chart; names match loosely (rap, hiphop, rnb)\n"+
+		"/song rock 10s 3 — a clip length (1s to 25s) and a number of songs (1 to 10), at the end, in either order\n"+
+		"/song genres — the genres\n"+
+		"/song end — finish now (only whoever started it)\n"+
+		"/song scores — this chat's totals over the last 7 days\n"+
+		"Each song: %s to answer. The title %d points, the artist %d, and %d more for the first right.",
+		s.cfg.Songs, plural(s.cfg.Songs, "song", "songs"), lengthLabel(clipLength), lengthLabel(s.cfg.Time), titlePoints, artistPoints, firstBonus)
 }
 
 // unknownGenre is the answer to /song with a genre Deezer hasn't, naming

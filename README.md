@@ -11,6 +11,7 @@ After the last, it ranks the players, and keeps a 7-day scoreboard.
 /song                  SONGS_SONGS songs (5 by default) from Deezer's chart of all genres
 /song rock             from a genre's chart: Deezer's genre names, such as pop, rock, rap, hip hop, dance, r&b, jazz
 /song pop 10s 3        with a clip length (1s to 25s) and a number of songs (1 to 10), at the end, in either order
+/song help             every command, with the defaults in use
 /song genres           list Deezer's genres; an unknown genre lists some of them too
 /song end              finish now: the open song's reveal and the results (only the player who started it)
 /song scores           this chat's totals over the last 7 days
