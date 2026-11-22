@@ -130,6 +130,11 @@ func (s *server) command(ctx context.Context, c *addon.Context, args string) add
 			fields = fields[:len(fields)-1]
 			continue
 		}
+		if _, isDecade := findDecade(last); isDecade { // /song 80s: a decade, not 80 seconds; 10s is a clip length
+			if _, err := clipArg(last); err != nil {
+				break
+			}
+		}
 		if !gotClip && startsWithDigit(last) {
 			if _, err := time.ParseDuration(strings.ToLower(last)); err == nil {
 				d, err := clipArg(last)
@@ -199,7 +204,14 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 		return addon.Text(unreachable)
 	}
 	chosen := genre{ID: 0}
-	if genreName != "" {
+	var chart []track
+	var err error
+	if dec, ok := findDecade(genreName); ok {
+		chosen = genre{ID: -1, Name: dec.Label}
+		if chart, err = s.deezer.Decade(gctx, dec); err != nil {
+			return failed(err)
+		}
+	} else if genreName != "" {
 		genres, err := s.deezer.Genres(gctx)
 		if err != nil {
 			return failed(err)
@@ -210,9 +222,10 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 		}
 		chosen = g
 	}
-	chart, err := s.deezer.Chart(gctx, chosen.ID)
-	if err != nil {
-		return failed(err)
+	if chosen.ID >= 0 {
+		if chart, err = s.deezer.Chart(gctx, chosen.ID); err != nil {
+			return failed(err)
+		}
 	}
 	pool := s.pick(c.Chat, chart, n)
 	if len(pool) == 0 {
@@ -271,8 +284,9 @@ func (s *server) helpText() string {
 	return fmt.Sprintf("🎵 **Song quiz**: guess a song from a short clip, by replying with its title or artist.\n"+
 		"/song — %d %s from the main chart, %s clips\n"+
 		"/song rock — a genre's chart; names match loosely (rap, hiphop, rnb)\n"+
+		"/song 80s — a decade's hits: 60s, 70s, 80s, 90s, 2000s, 2010s\n"+
 		"/song rock 10s 3 — a clip length (1s to 25s) and a number of songs (1 to 10), at the end, in either order\n"+
-		"/song genres — the genres\n"+
+		"/song genres — the genres and decades\n"+
 		"/song end — finish now (only whoever started it)\n"+
 		"/song scores — this chat's totals over the last 7 days\n"+
 		"Each song: %s to answer. The title %d points, the artist %d, and %d more for the first right.",
@@ -305,7 +319,16 @@ func (s *server) genreList(ctx context.Context) string {
 	if err != nil || genreNames(genres, len(genres)) == "" {
 		return unreachable
 	}
-	return "🎵 **Genres:** " + genreNames(genres, len(genres)) + ".\nPlay one with, say, /song rock; plain /song plays the main chart."
+	return "🎵 **Genres:** " + genreNames(genres, len(genres)) + ".\n**Decades:** " + decadeNames() + ".\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart."
+}
+
+// decadeNames are the decades /song plays, as it takes them.
+func decadeNames() string {
+	var names []string
+	for _, d := range decades {
+		names = append(names, d.Label)
+	}
+	return strings.Join(names, ", ")
 }
 
 // intro is the game's first lines: its genre, its length, and how to

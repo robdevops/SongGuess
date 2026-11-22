@@ -128,7 +128,7 @@ type fakeDeezer struct {
 
 func newFakeDeezer(t *testing.T) *fakeDeezer {
 	d := &fakeDeezer{
-		charts:  map[string][]track{"0": songs, "152": rockSongs, "116": songs[:2]},
+		charts:  map[string][]track{"0": songs, "152": rockSongs, "116": songs[:2], "pl867825522": rockSongs, "pl868": songs[:3], "pl14917741483": rockSongs},
 		failing: map[int64]bool{202: true, 203: true},
 		noCover: map[int64]bool{201: true},
 	}
@@ -146,12 +146,21 @@ func newFakeDeezer(t *testing.T) *fakeDeezer {
 		switch {
 		case path == "/genre":
 			io.WriteString(w, `{"data":[{"id":0,"name":"All"},{"id":132,"name":"Pop"},{"id":152,"name":"Rock"},{"id":116,"name":"Rap/Hip Hop"},{"id":165,"name":"R&B"}]}`)
-		case strings.HasPrefix(path, "/chart/") && strings.HasSuffix(path, "/tracks"):
+		case path == "/search/playlist":
+			// A fan's list first, then the editors' "80s Hits", whose ID the
+			// test charts hold as "pl" + ID.
+			io.WriteString(w, `{"data":[{"id":5,"title":"80s Hits","user":{"name":"Alice"}},{"id":867,"title":"80s Party Hits","user":{"name":"Laeti - Deezer Pop Editor"}},{"id":868,"title":"80s Hits","user":{"name":"Laeti - Deezer Pop Editor"}}]}`)
+		case strings.HasPrefix(path, "/chart/") && strings.HasSuffix(path, "/tracks"),
+			strings.HasPrefix(path, "/playlist/") && strings.HasSuffix(path, "/tracks"):
 			if r.URL.Query().Get("limit") != "100" {
 				t.Errorf("chart %s", r.URL)
 			}
+			key := strings.TrimSuffix(strings.TrimPrefix(path, "/chart/"), "/tracks")
+			if strings.HasPrefix(path, "/playlist/") {
+				key = "pl" + strings.TrimSuffix(strings.TrimPrefix(path, "/playlist/"), "/tracks")
+			}
 			d.mu.Lock()
-			list := d.charts[strings.TrimSuffix(strings.TrimPrefix(path, "/chart/"), "/tracks")]
+			list := d.charts[key]
 			d.mu.Unlock()
 			var data []map[string]any
 			for _, tr := range list {
@@ -1067,8 +1076,8 @@ func TestArgs(t *testing.T) {
 		"0s":        badClip,
 		"rock 2.5s": badClip,
 		"polka":     "I don't know that genre. Try one of: pop, rock, rap/hip hop, r&b, or /song genres for them all.",
-		"genres":    "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\nPlay one with, say, /song rock; plain /song plays the main chart.",
-		"GENRE":     "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\nPlay one with, say, /song rock; plain /song plays the main chart.",
+		"genres":    "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
+		"GENRE":     "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
 		"help":      c.s.helpText(),
 	} {
 		if got := words(c.song(args, from(clk, chat, alice))); got != want {
@@ -1317,6 +1326,47 @@ func TestHelp(t *testing.T) {
 	for _, want := range []string{"/song — 3 songs from the main chart, 5s clips", "/song rock —", "/song rock 10s 3 —", "/song genres —", "/song end —", "/song scores —", "45s to answer", "10 points"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+// /song 80s plays the editors' 80s Hits playlist, not 80-second clips; it
+// combines with a clip length; with the pinned playlist gone, the search
+// finds the editors' own "80s Hits"; an unknown decade is no genre.
+func TestDecade(t *testing.T) {
+	clk, c, d, _ := begin(t)
+	got := words(c.song("80s 10s 2", from(clk, chat, alice)))
+	if !strings.HasPrefix(got, "🎵 **Song quiz: 80s** · 2 songs, 10s clips") {
+		t.Fatalf("intro %q", got)
+	}
+	if !slices.Contains(d.fetched(), "/playlist/867825522/tracks?limit=100") {
+		t.Errorf("requests %v", d.fetched())
+	}
+	c.song("end", from(clk, chat, alice))
+	d.mu.Lock()
+	delete(d.charts, "pl867825522")
+	d.mu.Unlock()
+	if got := words(c.song("1980s", from(clk, "c_two", bob))); !strings.HasPrefix(got, "🎵 **Song quiz: 80s** · ") {
+		t.Errorf("after the search %q", got)
+	}
+	if !slices.Contains(d.fetched(), "/playlist/868/tracks?limit=100") {
+		t.Errorf("the search didn't pick the editors' 80s Hits: %v", d.fetched())
+	}
+	for name, want := range map[string]string{"80s": "80s", "80's": "80s", "1980s": "80s", "eighties": "80s", "2000s": "2000s", "00s": "2000s", "2010s": "2010s", "1960s": "60s", "70's": "70s"} {
+		if dec, ok := findDecade(name); !ok || dec.Label != want {
+			t.Errorf("findDecade(%q) = %v %v", name, dec, ok)
+		}
+	}
+	// 10s alone is 10-second clips of the main chart; the 2010s are 2010s.
+	if got := words(c.song("10s", from(clk, "c_three", alice))); !strings.HasPrefix(got, "🎵 **Song quiz** · ") || !strings.Contains(got, ", 10s clips") {
+		t.Errorf("/song 10s: %q", got)
+	}
+	if got := words(c.song("2010s 10s", from(clk, "c_four", alice))); !strings.HasPrefix(got, "🎵 **Song quiz: 2010s** · ") || !strings.Contains(got, ", 10s clips") {
+		t.Errorf("/song 2010s 10s: %q", got)
+	}
+	for _, name := range []string{"50s", "80", "20s", "rock"} {
+		if _, ok := findDecade(name); ok {
+			t.Errorf("findDecade(%q) passed", name)
 		}
 	}
 }

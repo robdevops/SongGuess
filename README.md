@@ -10,6 +10,7 @@ After the last, it ranks the players, and keeps a 7-day scoreboard.
 ```
 /song                  SONGS_SONGS songs (5 by default) from Deezer's chart of all genres
 /song rock             from a genre's chart: Deezer's genre names, such as pop, rock, rap, hip hop, dance, r&b, jazz
+/song 80s              a decade's hits, from Deezer's editors' playlists: 60s, 70s, 80s, 90s, 2000s, 2010s
 /song pop 10s 3        with a clip length (1s to 25s) and a number of songs (1 to 10), at the end, in either order
 /song help             every command, with the defaults in use
 /song genres           list Deezer's genres; an unknown genre lists some of them too
@@ -121,7 +122,7 @@ bot's user may create or write.
 
 It shares the bot's memory limit, so allow for `SONGS_MEMLIMIT` in
 `mem_limit` or `MemoryMax`. The network it needs is `api.deezer.com` and
-Deezer's CDN for the previews and covers (`*.dzcdn.net`), over HTTPS.
+Deezer's CDN for the previews and covers (`cdnt-preview.dzcdn.net (previews) and cdn-images.dzcdn.net (covers)`), over HTTPS.
 
 ## Settings
 

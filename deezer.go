@@ -171,6 +171,17 @@ func (d *deezer) Genres(ctx context.Context) ([]genre, error) {
 // Chart is the top tracks of a genre's chart (0 is all genres) that have a
 // preview.
 func (d *deezer) Chart(ctx context.Context, genreID int) ([]track, error) {
+	return d.tracks(ctx, "the chart", "/chart/"+strconv.Itoa(genreID)+"/tracks?limit="+strconv.Itoa(chartSize))
+}
+
+// Playlist is a playlist's tracks with a preview, in its order.
+func (d *deezer) Playlist(ctx context.Context, id int64) ([]track, error) {
+	return d.tracks(ctx, "a playlist", "/playlist/"+strconv.FormatInt(id, 10)+"/tracks?limit="+strconv.Itoa(chartSize))
+}
+
+// tracks are the tracks with a preview that path at the API lists, as a
+// chart or a playlist does.
+func (d *deezer) tracks(ctx context.Context, what, path string) ([]track, error) {
 	var r struct {
 		Data []struct {
 			ID         int64  `json:"id"`
@@ -185,8 +196,7 @@ func (d *deezer) Chart(ctx context.Context, genreID int) ([]track, error) {
 			} `json:"album"`
 		} `json:"data"`
 	}
-	path := "/chart/" + strconv.Itoa(genreID) + "/tracks?limit=" + strconv.Itoa(chartSize)
-	if err := d.getJSON(ctx, "the chart", path, &r); err != nil {
+	if err := d.getJSON(ctx, what, path, &r); err != nil {
 		return nil, err
 	}
 	var out []track
@@ -218,6 +228,79 @@ func (d *deezer) Cover(ctx context.Context, t track) ([]byte, error) {
 		err = fmt.Errorf("a cover: not a JPEG: %w", errDeezer)
 	}
 	return b, err
+}
+
+// decade is a decade /song can play: its label, and the "Hits" playlist
+// Deezer's editors keep for it.
+type decade struct {
+	Label    string
+	Playlist int64
+}
+
+// decades are Deezer's editors' playlists of each decade's hits, as found
+// in November 2026. If one is gone, the search finds its successor.
+var decades = []decade{
+	{"60s", 620264073}, {"70s", 1470022445}, {"80s", 867825522},
+	{"90s", 878989033}, {"2000s", 248297032}, {"2010s", 14917741483},
+}
+
+// findDecade is the decade name names: 80s, 80's, 1980s, eighties, or ok
+// false.
+func findDecade(name string) (decade, bool) {
+	n := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(name), "'", ""), "’", ""))
+	words := map[string]string{"sixties": "60s", "seventies": "70s", "eighties": "80s", "nineties": "90s", "noughties": "2000s", "00s": "2000s", "10s": "2010s"}
+	if w, ok := words[n]; ok {
+		n = w
+	}
+	if len(n) == 5 && strings.HasPrefix(n, "19") {
+		n = n[2:] // 1980s
+	}
+	for _, d := range decades {
+		if d.Label == n {
+			return d, true
+		}
+	}
+	return decade{}, false
+}
+
+// Decade is a decade's hits: its editors' playlist, or, if that is gone
+// or empty, the playlist a search for "<decade> Hits" finds that Deezer's
+// editors made (their 2000s and 2010s are "00s Hits" and "10s Hits").
+func (d *deezer) Decade(ctx context.Context, dec decade) ([]track, error) {
+	list, err := d.Playlist(ctx, dec.Playlist)
+	if err == nil && len(list) > 0 {
+		return list, nil
+	}
+	var r struct {
+		Data []struct {
+			ID    int64  `json:"id"`
+			Title string `json:"title"`
+			User  struct {
+				Name string `json:"name"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	short := strings.TrimPrefix(strings.TrimPrefix(dec.Label, "20"), "19") // Deezer's titles: "00s Hits"
+	if err := d.getJSON(ctx, "a playlist search", "/search/playlist?q="+url.QueryEscape(short+" hits")+"&limit=25", &r); err != nil {
+		return nil, err
+	}
+	var pick int64
+	for _, p := range r.Data { // the editors' own "80s Hits" first, then any of theirs
+		if !strings.Contains(p.User.Name, "Deezer") {
+			continue
+		}
+		if normalize(p.Title) == normalize(short+" hits") {
+			pick = p.ID
+			break
+		}
+		if pick == 0 {
+			pick = p.ID
+		}
+	}
+	if pick == 0 {
+		return nil, fmt.Errorf("a decade's playlist: none found: %w", errDeezer)
+	}
+	return d.Playlist(ctx, pick)
 }
 
 // findGenre is the genre called name, in any case and with or without its
