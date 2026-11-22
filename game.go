@@ -707,6 +707,9 @@ func (s *server) answer(c *addon.Context, msg string) addon.Result {
 	t := g.Songs[g.Current]
 	g.Seq++
 	g.Answers[c.Sender] = answer{Title: matches(msg, titleNames(t)), Artist: matches(msg, artistNames(t)), At: at, Seq: g.Seq}
+	if len(g.Players) > 0 && !slices.Contains(g.Players, c.Sender) {
+		g.Players = append(g.Players, c.Sender) // whoever answers is waited for from the next one on
+	}
 	if s.allAnswered(g) {
 		// Everyone playing has answered: end the song now, revealing it
 		// after settle, as at its deadline, for answers still on their way.
