@@ -1344,7 +1344,7 @@ func TestFewerThanAsked(t *testing.T) {
 func TestHelp(t *testing.T) {
 	clk, c, _, _ := begin(t)
 	got := words(c.song("help", from(clk, chat, alice)))
-	for _, want := range []string{"/song [genre or decade] [clip length] [songs]", "/song 80s 10s 3", "/song genres", "/song end", "/song scores", "Title 10 pts"} {
+	for _, want := range []string{"/song [genre or decade] [clip length] [rounds]", "/song 80s 10s 3", "/song genres", "/song end", "/song scores", "Title 10 pts"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help lacks %q:\n%s", want, got)
 		}

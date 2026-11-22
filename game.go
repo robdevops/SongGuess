@@ -295,7 +295,7 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 // helpText is /song help: every command, with the defaults in use.
 func (s *server) helpText() string {
 	return fmt.Sprintf("🎵 **Song quiz**: reply to each clip with the title or artist.\n"+
-		"/song [genre or decade] [clip length] [songs]\n"+
+		"/song [genre or decade] [clip length] [rounds]\n"+
 		"e.g. /song, /song rock, /song 80s 10s 3\n"+
 		"/song genres — what you can pick\n"+
 		"/song end · /song scores\n"+
