@@ -28,6 +28,11 @@ public API needs none.
 
 ## How to play
 
+- **Games:** `/song games` plays video game music, from the playlists of
+  Deezer's soundtracks editor (Adventure Mode, Retro Gaming, Minecraft
+  Classics, League of Legends), as Deezer's Films/Games chart is mostly film
+  songs; with the `model` permission, the model also keeps only game music.
+  Instrumentals count there.
 - **Songs in English only**, unless `SONGS_ANY_LANGUAGE` is `true`. Deezer
   doesn't say a song's language, so when a game starts the bot's model
   picks the English ones from the chart; without the `model` permission,

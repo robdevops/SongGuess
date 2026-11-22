@@ -226,13 +226,18 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 		}
 		chosen = g
 	}
-	if chosen.ID >= 0 {
+	switch {
+	case chosen.ID == gamesGenre: // the chart is mostly film songs: the editors' game playlists instead
+		if chart, err = s.deezer.Games(gctx); err != nil {
+			return failed(err)
+		}
+	case chosen.ID >= 0:
 		if chart, err = s.deezer.Chart(gctx, chosen.ID); err != nil {
 			return failed(err)
 		}
 	}
 	pool := s.pick(c.Chat, chart, 3*n+poolExtra) // more than needed: some may not be in English
-	pool = s.english(gctx, c.Chat, pool)
+	pool = s.english(gctx, c.Chat, pool, chosen.ID == gamesGenre)
 	pool = pool[:min(len(pool), n+poolExtra)]
 	if len(pool) == 0 {
 		if len(chart) == 0 {
@@ -261,7 +266,7 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 	now := s.clock.Now()
 	count := min(n, 1+len(pool))
 	g := &game{
-		ID: "s" + randomID(6), Chat: c.Chat, Starter: c.Sender, Genre: chosen.Name,
+		ID: "s" + randomID(6), Chat: c.Chat, Starter: c.Sender, Genre: genreLabel(chosen),
 		Count: count, Asked: n, Clip: length, Time: s.cfg.Time,
 		Started: now, End: now.Add(time.Duration(count)*(s.cfg.Time+settle) + time.Duration(count-1)*s.gap + fetchSlack),
 		Songs: []track{t}, Pool: pool, Opened: now,
@@ -312,11 +317,23 @@ func unknownGenre(genres []genre) string {
 
 // genreNames are Deezer's genres, at most limit of them, as /song takes
 // them.
+// gamesGenre is Deezer's Films/Games genre, which the game plays as video
+// game music only.
+const gamesGenre = 173
+
+// genreLabel is g's name as the game shows it: Films/Games is Games.
+func genreLabel(g genre) string {
+	if g.ID == gamesGenre {
+		return "Games"
+	}
+	return g.Name
+}
+
 func genreNames(genres []genre, limit int) string {
 	var names []string
 	for _, g := range genres {
 		if g.ID != 0 && len(names) < limit {
-			names = append(names, strings.ToLower(g.Name))
+			names = append(names, strings.ToLower(genreLabel(g)))
 		}
 	}
 	return strings.Join(names, ", ")

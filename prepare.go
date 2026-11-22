@@ -201,8 +201,8 @@ func (s *server) prunePlayed(now time.Time) {
 // the bot's model decides, as Deezer doesn't say a track's language; without
 // it, or if it fails, only tracks whose title or artist is in a script other
 // than Latin are dropped. With SONGS_ANY_LANGUAGE, tracks as they are.
-func (s *server) english(ctx context.Context, chat string, tracks []track) []track {
-	if s.cfg.Anyway || len(tracks) == 0 {
+func (s *server) english(ctx context.Context, chat string, tracks []track, games bool) []track {
+	if s.cfg.Anyway && !games || len(tracks) == 0 {
 		return tracks
 	}
 	latin := slices.DeleteFunc(slices.Clone(tracks), func(t track) bool { return !isLatin(t.Title) || !isLatin(t.Artist) })
@@ -222,8 +222,12 @@ func (s *server) english(ctx context.Context, chat string, tracks []track) []tra
 	zero := 0.0
 	ctx, cancel := context.WithTimeout(ctx, judgeTimeout)
 	defer cancel()
+	prompt := `You know popular music. For each track below, decide whether its lyrics are sung mainly in English. An instrumental, or a song mainly in another language, is not. Reply with JSON only, no other text: {"english":[1,3]}, the ids of the English ones.`
+	if games {
+		prompt = `You know video game music. For each track below, decide whether it is music from a video game: a game's soundtrack, theme or score, or a song made for a game. Music from a film or TV show, or a song merely used in a trailer, is not. Instrumentals are fine; a song with lyrics must be sung mainly in English. Reply with JSON only, no other text: {"english":[1,3]}, the ids of the tracks that qualify.`
+	}
 	res, err := s.srv.Sample(ctx, chat, addon.SampleRequest{
-		SystemPrompt: `You know popular music. For each track below, decide whether its lyrics are sung mainly in English. An instrumental, or a song mainly in another language, is not. Reply with JSON only, no other text: {"english":[1,3]}, the ids of the English ones.`,
+		SystemPrompt: prompt,
 		MaxTokens:    judgeTokens, Temperature: &zero,
 		Messages: []addon.SampleMessage{{Role: "user", Content: addon.Content{Type: "text", Text: string(body)}}},
 	})

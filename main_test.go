@@ -130,7 +130,7 @@ type fakeDeezer struct {
 
 func newFakeDeezer(t *testing.T) *fakeDeezer {
 	d := &fakeDeezer{
-		charts:  map[string][]track{"0": songs, "152": rockSongs, "116": songs[:2], "pl867825522": rockSongs, "pl868": songs[:3], "pl14917741483": rockSongs, "pl13650084141": rockSongs},
+		charts:  map[string][]track{"0": songs, "152": rockSongs, "116": songs[:2], "pl867825522": rockSongs, "pl868": songs[:3], "pl14917741483": rockSongs, "pl4380597982": rockSongs, "pl13650084141": rockSongs},
 		failing: map[int64]bool{202: true, 203: true},
 		noCover: map[int64]bool{201: true},
 	}
@@ -147,7 +147,7 @@ func newFakeDeezer(t *testing.T) *fakeDeezer {
 		path := r.URL.Path
 		switch {
 		case path == "/genre":
-			io.WriteString(w, `{"data":[{"id":0,"name":"All"},{"id":132,"name":"Pop"},{"id":152,"name":"Rock"},{"id":116,"name":"Rap/Hip Hop"},{"id":165,"name":"R&B"}]}`)
+			io.WriteString(w, `{"data":[{"id":0,"name":"All"},{"id":132,"name":"Pop"},{"id":152,"name":"Rock"},{"id":116,"name":"Rap/Hip Hop"},{"id":165,"name":"R&B"},{"id":173,"name":"Films/Games"}]}`)
 		case path == "/search/playlist":
 			// A fan's list first, then the editors' "80s Hits", whose ID the
 			// test charts hold as "pl" + ID.
@@ -1102,9 +1102,9 @@ func TestArgs(t *testing.T) {
 		"30s":       badClip,
 		"0s":        badClip,
 		"rock 2.5s": badClip,
-		"polka":     "I don't know that genre. Try one of: pop, rock, rap/hip hop, r&b, or /song genres for them all.",
-		"genres":    "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s, 2020s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
-		"GENRE":     "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s, 2020s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
+		"polka":     "I don't know that genre. Try one of: pop, rock, rap/hip hop, r&b, games, or /song genres for them all.",
+		"genres":    "🎵 **Genres:** pop, rock, rap/hip hop, r&b, games.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s, 2020s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
+		"GENRE":     "🎵 **Genres:** pop, rock, rap/hip hop, r&b, games.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s, 2020s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
 		"help":      c.s.helpText(),
 	} {
 		if got := words(c.song(args, from(clk, chat, alice))); got != want {
@@ -1579,11 +1579,48 @@ func TestEnglishOnly(t *testing.T) {
 	ts := []track{{ID: 1, Title: "Hello", Artist: "Adele"}, {ID: 2, Title: "Despacito", Artist: "Luis Fonsi"}, {ID: 3, Title: "다이너마이트", Artist: "BTS"}}
 	s := &server{cfg: config{}, log: log.New(io.Discard, "", 0)}
 	s.srv = addon.New(addon.Config{Name: "songs"}) // no sampling offered: by script
-	if got := s.english(context.Background(), chat, ts); len(got) != 2 || got[0].ID != 1 || got[1].ID != 2 {
+	if got := s.english(context.Background(), chat, ts, false); len(got) != 2 || got[0].ID != 1 || got[1].ID != 2 {
 		t.Errorf("by script %v", got)
 	}
 	s.cfg.Anyway = true
-	if got := s.english(context.Background(), chat, ts); len(got) != 3 {
+	if got := s.english(context.Background(), chat, ts, false); len(got) != 3 {
 		t.Errorf("any language %v", got)
+	}
+}
+
+// Films/Games is shown as games, found by game or video games, and played
+// as video game music.
+func TestGamesGenre(t *testing.T) {
+	genres := []genre{{0, "All"}, {132, "Pop"}, {173, "Films/Games"}}
+	if got := genreNames(genres, 10); got != "pop, games" {
+		t.Errorf("names %q", got)
+	}
+	for _, name := range []string{"games", "game", "video games", "videogame"} {
+		if g, ok := findGenre(genres, name); !ok || g.ID != gamesGenre {
+			t.Errorf("findGenre(%q) = %v %v", name, g, ok)
+		}
+	}
+	if genreLabel(genres[2]) != "Games" {
+		t.Error("label")
+	}
+	// Without the model, games keeps the tracks it can't judge, even with
+	// SONGS_ANY_LANGUAGE.
+	s := &server{cfg: config{Anyway: true}, log: log.New(io.Discard, "", 0)}
+	s.srv = addon.New(addon.Config{Name: "songs"})
+	if got := s.english(context.Background(), chat, []track{{ID: 1, Title: "Halo Theme", Artist: "Martin O'Donnell"}}, true); len(got) != 1 {
+		t.Errorf("games without the model %v", got)
+	}
+}
+
+// /song games plays the editors' game playlists, not the Films/Games
+// chart, and is shown as games.
+func TestGamesSource(t *testing.T) {
+	clk, c, d, _ := begin(t)
+	got := words(c.song("games 2", from(clk, chat, alice)))
+	if !strings.HasPrefix(got, "🎵 **Song quiz: Games** · ") {
+		t.Fatalf("intro %q", got)
+	}
+	if !slices.Contains(d.fetched(), "/playlist/4380597982/tracks?limit=100") || slices.Contains(d.fetched(), "/chart/173/tracks?limit=100") {
+		t.Errorf("requests %v", d.fetched())
 	}
 }

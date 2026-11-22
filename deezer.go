@@ -304,6 +304,36 @@ func (d *deezer) Decade(ctx context.Context, dec decade) ([]track, error) {
 	return d.Playlist(ctx, pick)
 }
 
+// gamePlaylists are Deezer's soundtracks editor's playlists of video game
+// music, as found in November 2026: the Films/Games chart is mostly film
+// songs, so games plays from these.
+var gamePlaylists = []int64{4380597982, 1050403591, 7564191762, 550136883} // Adventure Mode, Retro Gaming, Minecraft Classics, League of Legends
+
+// Games is the tracks of gamePlaylists, each once; a playlist that fails is
+// left out, and only if all do is it an error.
+func (d *deezer) Games(ctx context.Context) ([]track, error) {
+	var out []track
+	seen := map[int64]bool{}
+	var last error
+	for _, id := range gamePlaylists {
+		list, err := d.Playlist(ctx, id)
+		if err != nil {
+			last = err
+			continue
+		}
+		for _, t := range list {
+			if !seen[t.ID] {
+				seen[t.ID] = true
+				out = append(out, t)
+			}
+		}
+	}
+	if len(out) == 0 && last != nil {
+		return nil, last
+	}
+	return out, nil
+}
+
 // findGenre is the genre called name, in any case and with or without its
 // punctuation ("hip hop" and "rap" are both Rap/Hip Hop's), or ok false.
 func findGenre(genres []genre, name string) (genre, bool) {
@@ -332,7 +362,7 @@ func findGenre(genres []genre, name string) (genre, bool) {
 
 // genreAliases are genre names as people type them, by their normalised
 // letters, and Deezer's names for them.
-var genreAliases = map[string]string{"rnb": "R&B", "randb": "R&B", "hiphop": "Hip Hop", "edm": "Electro", "electronic": "Electro"}
+var genreAliases = map[string]string{"rnb": "R&B", "randb": "R&B", "hiphop": "Hip Hop", "edm": "Electro", "electronic": "Electro", "game": "Films/Games", "videogames": "Films/Games", "videogame": "Films/Games"}
 
 // clean is s as a post may carry it: on one line, with Markdown's
 // characters and braces taken out, so a title can't style a post, link, or
