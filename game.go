@@ -294,7 +294,7 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 	return addon.Result{
 		Content: addon.Text(clamp(text, maxPost)).Content,
 		Meta: &addon.ResultMeta{Watch: &addon.Watch{
-			ID: g.ID, Replies: true, Reactions: g.Lobby, Until: g.End.Add(watchSlack).Format(time.RFC3339), Tool: "song_answer",
+			ID: g.ID, Replies: true, Reactions: g.Lobby, Until: g.End.Add(watchSlack).Format(time.RFC3339), Tool: "song_answer", Over: "That song quiz is over. Start another with /song.",
 		}},
 	}
 }

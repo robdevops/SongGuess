@@ -1421,7 +1421,7 @@ func TestLobby(t *testing.T) {
 	c := connect(t, testServer(t, t.TempDir(), clk, logs, d.srv.URL))
 	c.initializeWith(true, true)
 	r := c.song("2", from(clk, chat, alice))
-	if !strings.Contains(words(r), "React to this message with any emoji to join.") || !strings.Contains(words(r), "You're in if you started it") || !r.Meta.Watch.Reactions {
+	if !strings.Contains(words(r), "React to this message with any emoji to join.") || !strings.Contains(words(r), "You're in if you started it") || !r.Meta.Watch.Reactions || !strings.HasSuffix(r.Meta.Watch.Over, "is over. Start another with /song.") {
 		t.Fatalf("intro %+v", r)
 	}
 	if rr := c.reply("anything", from(clk, chat, bob)); words(rr) != "The song quiz hasn't started yet." {
