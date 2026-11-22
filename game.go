@@ -355,7 +355,7 @@ func intro(g *game) string {
 	}
 	join, early := "", "From song 2 on, a song ends as soon as everyone who answered song 1 has answered."
 	if g.Lobby {
-		join = fmt.Sprintf("👋 **React to this message with any emoji to join.** The game starts 30 seconds after the last player joins, once there are at least %d of you.\n", minPlayers)
+		join = "👋 **React to this message with any emoji to join.** You're in if you started it: the game starts 30 seconds after the next player joins, or after the last one if more join.\n"
 		early = "A song ends as soon as everyone who joined has answered."
 	}
 	return fmt.Sprintf("%s · %d %s%s, %s clips, %s to answer each.\n%s"+
