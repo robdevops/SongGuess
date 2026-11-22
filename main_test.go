@@ -128,7 +128,7 @@ type fakeDeezer struct {
 
 func newFakeDeezer(t *testing.T) *fakeDeezer {
 	d := &fakeDeezer{
-		charts:  map[string][]track{"0": songs, "152": rockSongs, "116": songs[:2], "pl867825522": rockSongs, "pl868": songs[:3], "pl14917741483": rockSongs},
+		charts:  map[string][]track{"0": songs, "152": rockSongs, "116": songs[:2], "pl867825522": rockSongs, "pl868": songs[:3], "pl14917741483": rockSongs, "pl13650084141": rockSongs},
 		failing: map[int64]bool{202: true, 203: true},
 		noCover: map[int64]bool{201: true},
 	}
@@ -1076,8 +1076,8 @@ func TestArgs(t *testing.T) {
 		"0s":        badClip,
 		"rock 2.5s": badClip,
 		"polka":     "I don't know that genre. Try one of: pop, rock, rap/hip hop, r&b, or /song genres for them all.",
-		"genres":    "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
-		"GENRE":     "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
+		"genres":    "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s, 2020s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
+		"GENRE":     "🎵 **Genres:** pop, rock, rap/hip hop, r&b.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s, 2020s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
 		"help":      c.s.helpText(),
 	} {
 		if got := words(c.song(args, from(clk, chat, alice))); got != want {
@@ -1352,7 +1352,7 @@ func TestDecade(t *testing.T) {
 	if !slices.Contains(d.fetched(), "/playlist/868/tracks?limit=100") {
 		t.Errorf("the search didn't pick the editors' 80s Hits: %v", d.fetched())
 	}
-	for name, want := range map[string]string{"80s": "80s", "80's": "80s", "1980s": "80s", "eighties": "80s", "2000s": "2000s", "00s": "2000s", "2010s": "2010s", "1960s": "60s", "70's": "70s"} {
+	for name, want := range map[string]string{"80s": "80s", "80's": "80s", "1980s": "80s", "eighties": "80s", "2000s": "2000s", "00s": "2000s", "2010s": "2010s", "1960s": "60s", "70's": "70s", "2020s": "2020s", "20's": "2020s"} {
 		if dec, ok := findDecade(name); !ok || dec.Label != want {
 			t.Errorf("findDecade(%q) = %v %v", name, dec, ok)
 		}
@@ -1360,6 +1360,12 @@ func TestDecade(t *testing.T) {
 	// 10s alone is 10-second clips of the main chart; the 2010s are 2010s.
 	if got := words(c.song("10s", from(clk, "c_three", alice))); !strings.HasPrefix(got, "🎵 **Song quiz** · ") || !strings.Contains(got, ", 10s clips") {
 		t.Errorf("/song 10s: %q", got)
+	}
+	if got := words(c.song("20s", from(clk, "c_six", alice))); !strings.HasPrefix(got, "🎵 **Song quiz** · ") || !strings.Contains(got, ", 20s clips") {
+		t.Errorf("/song 20s: %q", got)
+	}
+	if got := words(c.song("2020s", from(clk, "c_seven", alice))); !strings.HasPrefix(got, "🎵 **Song quiz: 2020s** · ") {
+		t.Errorf("/song 2020s: %q", got)
 	}
 	if got := words(c.song("2010s 10s", from(clk, "c_four", alice))); !strings.HasPrefix(got, "🎵 **Song quiz: 2010s** · ") || !strings.Contains(got, ", 10s clips") {
 		t.Errorf("/song 2010s 10s: %q", got)

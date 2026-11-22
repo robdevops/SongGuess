@@ -242,13 +242,14 @@ type decade struct {
 var decades = []decade{
 	{"60s", 620264073}, {"70s", 1470022445}, {"80s", 867825522},
 	{"90s", 878989033}, {"2000s", 248297032}, {"2010s", 14917741483},
+	{"2020s", 13650084141},
 }
 
 // findDecade is the decade name names: 80s, 80's, 1980s, eighties, or ok
 // false.
 func findDecade(name string) (decade, bool) {
 	n := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(name), "'", ""), "’", ""))
-	words := map[string]string{"sixties": "60s", "seventies": "70s", "eighties": "80s", "nineties": "90s", "noughties": "2000s", "00s": "2000s", "10s": "2010s"}
+	words := map[string]string{"sixties": "60s", "seventies": "70s", "eighties": "80s", "nineties": "90s", "noughties": "2000s", "00s": "2000s", "10s": "2010s", "20s": "2020s"}
 	if w, ok := words[n]; ok {
 		n = w
 	}
@@ -265,7 +266,7 @@ func findDecade(name string) (decade, bool) {
 
 // Decade is a decade's hits: its editors' playlist, or, if that is gone
 // or empty, the playlist a search for "<decade> Hits" finds that Deezer's
-// editors made (their 2000s and 2010s are "00s Hits" and "10s Hits").
+// editors made (their 2000s to 2020s are "00s Hits" to "20s Hits").
 func (d *deezer) Decade(ctx context.Context, dec decade) ([]track, error) {
 	list, err := d.Playlist(ctx, dec.Playlist)
 	if err == nil && len(list) > 0 {

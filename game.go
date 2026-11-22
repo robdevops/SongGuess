@@ -284,7 +284,7 @@ func (s *server) helpText() string {
 	return fmt.Sprintf("🎵 **Song quiz**: guess a song from a short clip, by replying with its title or artist.\n"+
 		"/song — %d %s from the main chart, %s clips\n"+
 		"/song rock — a genre's chart; names match loosely (rap, hiphop, rnb)\n"+
-		"/song 80s — a decade's hits: 60s, 70s, 80s, 90s, 2000s, 2010s\n"+
+		"/song 80s — a decade's hits: 60s, 70s, 80s, 90s, 2000s, 2010s, 2020s\n"+
 		"/song rock 10s 3 — a clip length (1s to 25s) and a number of songs (1 to 10), at the end, in either order\n"+
 		"/song genres — the genres and decades\n"+
 		"/song end — finish now (only whoever started it)\n"+
