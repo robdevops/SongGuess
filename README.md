@@ -38,52 +38,41 @@ scoreboard.
 
 By default the songs are sung mainly in English, as the bot's model judges.
 
-## Install
+## Quick start
 
-It needs signalbot main at `d685491` or newer. Build it with Go 1.27 or
-newer:
+You need signalbot main at `d685491` or newer, and Go 1.27 or newer.
 
-```
-git clone https://github.com/robdevops/chat-plugin-songs.git
-cd chat-plugin-songs
-CGO_ENABLED=0 go build -ldflags='-s -w' -o /opt/signalbot-addons/songs .
-```
+1. **Build it:**
 
-Then add it to the MCP servers file (`MCP_CONFIG`). The server must be
-called `songs`:
+   ```
+   git clone https://github.com/robdevops/chat-plugin-songs.git
+   cd chat-plugin-songs
+   CGO_ENABLED=0 go build -ldflags='-s -w' -o /opt/signalbot-addons/songs .
+   ```
 
-```jsonc
-"songs": {
-  "command": "/opt/signalbot-addons/songs",
-  "chat_commands": {"song": {"tool": "song", "direct": true, "example": "/song rock", "timeout": "60s"}},
-  "addon": {
-    "chats": ["<group id>"],
-    "post": true, "watch": true,
-    "model": {"per_hour": 120, "max_tokens": 600}
-  }
-}
-```
+2. **Add it to the MCP servers file** (`MCP_CONFIG`). It must be called
+   `songs`. Put your group IDs in `chats`, or `["all"]`; add `"dms": true`
+   to play in DMs too. Keep the `model` permission: the bot's model judges
+   the answers and picks English songs. Without it, a stricter built-in
+   match judges.
 
-`chats` takes group IDs or `["all"]`. Add `"dms": true` for DMs. The
-permissions:
+   ```jsonc
+   "songs": {
+     "command": "/opt/signalbot-addons/songs",
+     "chat_commands": {"song": {"tool": "song", "direct": true, "example": "/song rock", "timeout": "60s"}},
+     "addon": {
+       "chats": ["<group id>"],
+       "post": true, "watch": true,
+       "model": {"per_hour": 120, "max_tokens": 600}
+     }
+   }
+   ```
 
-- `post` sends each song, its reveal and the results.
-- `watch` reads the replies, and the reactions that join the lobby.
-- `model` lets the bot's model judge answers and pick English songs.
+3. **Restart signalbot** and type `/song` in the group.
 
-The game keeps its files in a state directory that signalbot sets up for
-it, so there is nothing to configure.
-
-## Settings
-
-| Variable | Default | Description |
-|---|---|---|
-| `SONGS_STATE_DIR` | signalbot's `addons/songs` | Where the game keeps its files |
-| `SONGS_SONGS` | `5` | Songs in a game when `/song` doesn't say, 1 to 10 |
-| `SONGS_TIME` | `35s` | Time to answer each song, 10s to 2m |
-| `SONGS_MEMLIMIT` | `64MiB` | Memory limit, at least 16MiB |
-| `SONGS_DEEZER` | `https://api.deezer.com` | Deezer's API, for testing |
-| `SONGS_ANY_LANGUAGE` | `false` | `true` plays songs in any language, except in `/song games` |
+Nothing else needs setting: Deezer needs no key. All the settings (such
+as `SONGS_ANY_LANGUAGE`), the permissions, and the Docker and systemd
+notes are in [docs/DETAILS.md](docs/DETAILS.md#settings-in-full).
 
 ## Credits and privacy
 
