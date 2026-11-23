@@ -51,17 +51,17 @@ You need signalbot main at `d685491` or newer, and Go 1.27 or newer.
    ```
 
 2. **Add it to the MCP servers file** (`MCP_CONFIG`). It must be called
-   `songs`. Put your group IDs in `chats`, or `["all"]`; add `"dms": true`
-   to play in DMs too. Keep the `model` permission: the bot's model judges
-   the answers and picks English songs. Without it, a stricter built-in
-   match judges.
+   `songs`. `chats: ["all"]` plays in every group; list group IDs to
+   limit it, and add `"dms": true` to play in DMs too. Keep the `model`
+   permission: the bot's model judges the answers and picks English
+   songs. Without it, a stricter built-in match judges.
 
    ```jsonc
    "songs": {
      "command": "/opt/signalbot-addons/songs",
      "chat_commands": {"song": {"tool": "song", "direct": true, "example": "/song rock", "timeout": "60s"}},
      "addon": {
-       "chats": ["<group id>"],
+       "chats": ["all"],
        "post": true, "watch": true,
        "model": {"per_hour": 120, "max_tokens": 600}
      }
