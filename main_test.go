@@ -699,7 +699,14 @@ func TestGame(t *testing.T) {
 		t.Errorf("ops before time is up: %+v", p)
 	}
 
-	clk.Advance(25*time.Second + settle)
+	clk.Advance(20 * time.Second) // 5s left: ⏰ on song 1
+	c.note()
+	page = c.outbox(page.Cursor)
+	if len(page.Ops) != 1 {
+		t.Fatalf("song 1's ⏰ %+v", page)
+	}
+	checkWarn(t, page.Ops[0], s1.ID)
+	clk.Advance(5*time.Second + settle)
 	c.note()
 	page = c.outbox(page.Cursor)
 	if len(page.Ops) != 2 {
@@ -744,11 +751,12 @@ func TestGame(t *testing.T) {
 	c.note()
 	page = c.outbox(page.Cursor)
 	results := "🏁 **Song quiz over**\n🥇 {u_alice} 35 · 2/3 songs\n🥈 {u_bob} 20 · 2/3 songs"
-	if len(page.Ops) != 3 || !strings.Contains(page.Ops[0].Text, "\nNobody got it.") || page.Ops[0].ReplyTo != s3.ID ||
-		page.Ops[1].Text != results || page.Ops[1].ReplyTo != "" {
+	if len(page.Ops) != 4 || !strings.Contains(page.Ops[1].Text, "\nNobody got it.") || page.Ops[1].ReplyTo != s3.ID ||
+		page.Ops[2].Text != results || page.Ops[2].ReplyTo != "" {
 		t.Fatalf("results %+v\nwant %q", page, results)
 	}
-	if o := page.Ops[2]; o.Op != "unwatch" || o.Chat != chat || o.Watch != w.ID {
+	checkWarn(t, page.Ops[0], s3.ID)
+	if o := page.Ops[3]; o.Op != "unwatch" || o.Chat != chat || o.Watch != w.ID {
 		t.Errorf("unwatch %+v", o)
 	}
 	if r := c.reply("anything", from(clk, chat, bob)); recorded(r) || words(r) != noGame {
@@ -871,10 +879,11 @@ func TestPreviewFails(t *testing.T) {
 	clk.Advance(30*time.Second + settle)
 	c.note()
 	page := c.outbox("0")
-	if len(page.Ops) != 4 || page.Ops[0].Audio == nil || !strings.HasPrefix(page.Ops[1].Text, "✅ **Back in Black** — AC/DC\nNobody got it.") ||
-		len(page.Ops[1].Images) != 0 || page.Ops[2].Text != "🏁 **Song quiz over.** Nobody scored." || page.Ops[3].Op != "unwatch" {
+	if len(page.Ops) != 5 || page.Ops[0].Audio == nil || !strings.HasPrefix(page.Ops[2].Text, "✅ **Back in Black** — AC/DC\nNobody got it.") ||
+		len(page.Ops[2].Images) != 0 || page.Ops[3].Text != "🏁 **Song quiz over.** Nobody scored." || page.Ops[4].Op != "unwatch" {
 		t.Fatalf("ops %+v", page)
 	}
+	checkWarn(t, page.Ops[1], page.Ops[0].ID)
 	if !strings.Contains(logs.String(), "a track skipped: a preview: status 404") {
 		t.Errorf("log:\n%s", logs)
 	}
@@ -969,10 +978,11 @@ func TestRestart(t *testing.T) {
 	clk.Advance(25*time.Second + settle)
 	c.note()
 	page = c.outbox(page.Cursor)
-	if len(page.Ops) != 2 || page.Ops[0].ReplyTo != s2.ID || len(page.Ops[0].Images) != 1 {
+	if len(page.Ops) != 3 || page.Ops[1].ReplyTo != s2.ID || len(page.Ops[1].Images) != 1 {
 		t.Fatalf("song 2's reveal %+v", page)
 	}
-	checkSong(t, page.Ops[1], 3, 3)
+	checkWarn(t, page.Ops[0], s2.ID)
+	checkSong(t, page.Ops[2], 3, 3)
 	c.close()
 
 	// Back after the game's time: its last song is revealed, then the
@@ -1056,8 +1066,8 @@ func TestGap(t *testing.T) {
 	clk.Advance(30*time.Second + settle)
 	c.note()
 	page = c.outbox(page.Cursor)
-	if len(page.Ops) != 1 || page.Ops[0].ReplyTo == "" {
-		t.Fatalf("the reveal alone %+v", page)
+	if len(page.Ops) != 2 || page.Ops[0].Op != "react" || page.Ops[1].ReplyTo == "" {
+		t.Fatalf("the ⏰ and the reveal alone %+v", page)
 	}
 	if rr := c.reply("anything", from(clk, chat, bob)); recorded(rr) || words(rr) != notYet {
 		t.Errorf("a reply in the pause: %+v", rr)
@@ -1086,7 +1096,7 @@ func TestLongReveal(t *testing.T) {
 	}
 	clk.Advance(30*time.Second + settle)
 	c.note()
-	text := c.outbox("0").Ops[1].Text
+	text := c.outbox("0").Ops[2].Text // after the song and its ⏰
 	if !strings.Contains(text, "{u_player19} and 10 more\nArtist: ") || len([]rune(text)) > maxPost {
 		t.Errorf("reveal %q", text)
 	}
@@ -1908,5 +1918,189 @@ func TestNoLobbyChoosesFirst(t *testing.T) {
 		}
 		c.s.mu.Unlock()
 		c.close()
+	}
+}
+
+// checkWarn checks that op reacts ⏰ to the post with the op ID post.
+func checkWarn(t *testing.T, op outboxOp, post string) {
+	t.Helper()
+	if op.Op != "react" || op.Chat != chat || op.Post != post || post == "" || op.Emoji != "⏰" || op.Ref != "" || op.Text != "" {
+		t.Errorf("⏰ %+v, want on %s", op, post)
+	}
+}
+
+// reacts are the ⏰ reactions on page.
+func reacts(page outboxPage) []outboxOp {
+	var out []outboxOp
+	for _, o := range page.Ops {
+		if o.Op == "react" {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// warned reports whether chat's game has its ⏰ armed.
+func (c *client) warned(chat string) bool {
+	c.s.mu.Lock()
+	defer c.s.mu.Unlock()
+	return c.s.warns[chat] != nil
+}
+
+// 5 seconds before each song's deadline the bot reacts ⏰ to its post, by
+// the post's op ID: not to a song that ended early, and each next song
+// gets its own.
+func TestWarn(t *testing.T) {
+	clk, c, _, _ := begin(t)
+	c.song("3", from(clk, chat, alice))
+	c.note()
+	page := c.outbox("0")
+	s1 := page.Ops[0]
+	c.ready()
+	c.reply(title(c.open()), from(clk, chat, alice))
+	c.reply("no idea", from(clk, chat, bob))
+	clk.Advance(25*time.Second - time.Nanosecond)
+	if p := c.outbox(page.Cursor); len(p.Ops) != 0 {
+		t.Fatalf("ops before 5s are left: %+v", p)
+	}
+	clk.Advance(time.Nanosecond)
+	c.note()
+	page = c.outbox(page.Cursor)
+	if len(page.Ops) != 1 {
+		t.Fatalf("song 1's ⏰ %+v", page)
+	}
+	checkWarn(t, page.Ops[0], s1.ID)
+	clk.Advance(5*time.Second + settle)
+	c.note()
+	page = c.outbox(page.Cursor)
+	if len(page.Ops) != 2 || len(reacts(page)) != 0 {
+		t.Fatalf("song 1's reveal %+v", page)
+	}
+	s2 := page.Ops[1]
+	c.ready()
+
+	// Song 2: Alice and Bob both answer, so it ends early: no ⏰.
+	clk.Advance(2 * time.Second)
+	c.reply("no idea", from(clk, chat, alice))
+	c.reply("no idea", from(clk, chat, bob))
+	if c.warned(chat) {
+		t.Error("song 2's ⏰ still armed after it ended early")
+	}
+	clk.Advance(settle)
+	c.note()
+	page = c.outbox(page.Cursor)
+	if len(page.Ops) != 2 || page.Ops[0].ReplyTo != s2.ID || len(reacts(page)) != 0 {
+		t.Fatalf("song 2's early reveal %+v", page)
+	}
+	s3 := page.Ops[1]
+	c.ready()
+
+	// Song 3 gets its own ⏰.
+	clk.Advance(25 * time.Second)
+	c.note()
+	page = c.outbox(page.Cursor)
+	if len(page.Ops) != 1 {
+		t.Fatalf("song 3's ⏰ %+v", page)
+	}
+	checkWarn(t, page.Ops[0], s3.ID)
+	if s3.ID == s1.ID {
+		t.Error("the same post twice")
+	}
+}
+
+// /song end stops the ⏰.
+func TestWarnEnd(t *testing.T) {
+	clk, c, _, _ := begin(t)
+	c.song("2", from(clk, chat, alice))
+	c.ready()
+	clk.Advance(10 * time.Second)
+	if !c.warned(chat) {
+		t.Fatal("no ⏰ armed")
+	}
+	c.song("end", from(clk, chat, alice))
+	c.note()
+	page := c.outbox("0")
+	if c.warned(chat) {
+		t.Error("the ⏰ is still armed after /song end")
+	}
+	clk.Advance(time.Minute)
+	if p := c.outbox(page.Cursor); len(p.Ops) != 0 || len(reacts(page)) != 0 {
+		t.Errorf("ops after /song end: %+v %+v", page, p)
+	}
+}
+
+// After a restart with more than 5s left, the ⏰ is armed again; with 5s
+// or less, there's none.
+func TestWarnRestart(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		after time.Duration // into song 1, of 30s
+		warn  bool
+	}{{"10s left", 20 * time.Second, true}, {"4s left", 26 * time.Second, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+			dir := t.TempDir()
+			var logs syncBuffer
+			d := newFakeDeezer(t)
+			c := connect(t, testServer(t, dir, clk, &logs, d.srv.URL))
+			c.initialize(true)
+			c.song("2", from(clk, chat, alice))
+			c.note()
+			s1 := c.outbox("0").Ops[0]
+			c.ready()
+			c.close()
+
+			// Back with a new clock: the old timers are gone.
+			clk = &fakeClock{now: clk.Now().Add(tc.after)}
+			c = connect(t, testServer(t, dir, clk, &logs, d.srv.URL))
+			c.initialize(true)
+			c.ready()
+			if c.warned(chat) != tc.warn {
+				t.Fatalf("⏰ armed: %v, want %v", c.warned(chat), tc.warn)
+			}
+			before := c.outbox("old.1")
+			if len(reacts(before)) != 0 {
+				t.Fatalf("a ⏰ at once: %+v", before)
+			}
+			if !tc.warn {
+				// Up to just before the reveal: still no ⏰.
+				clk.Advance(30*time.Second - tc.after - time.Second)
+				if page := c.outbox(before.Cursor); len(reacts(page)) != 0 {
+					t.Errorf("a ⏰ with 4s left: %+v", page)
+				}
+				return
+			}
+			clk.Advance(30*time.Second - warnBefore - tc.after)
+			page := c.outbox(before.Cursor)
+			c.note()
+			if len(page.Ops) != 1 {
+				t.Fatalf("song 1's ⏰ after a restart %+v", page)
+			}
+			checkWarn(t, page.Ops[0], s1.ID)
+		})
+	}
+}
+
+// A song shorter than warnMin gets no ⏰: there's nothing useful to warn
+// of. The game never posts one (minTime is warnMin), so this checks the
+// guard directly.
+func TestWarnShort(t *testing.T) {
+	clk, c, _, _ := begin(t)
+	c.song("2", from(clk, chat, alice))
+	c.note()
+	page := c.outbox("0")
+	c.ready()
+	c.s.mu.Lock()
+	g := c.s.games[chat]
+	g.Deadline = g.Opened.Add(warnMin - time.Second)
+	c.s.arm(g)
+	armed := c.s.warns[chat] != nil
+	c.s.mu.Unlock()
+	if armed {
+		t.Error("a ⏰ armed for a 9s song")
+	}
+	clk.Advance(warnMin - time.Second - warnBefore)
+	if p := c.outbox(page.Cursor); len(p.Ops) != 0 {
+		t.Errorf("ops on a 9s song: %+v", p)
 	}
 }

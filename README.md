@@ -32,6 +32,7 @@ scoreboard.
 - **Points.** 10 for the title and 5 for the artist. The first player to
   get either gets 5 more, marked ⚡.
 - **Early end.** A song ends as soon as every player has answered.
+- **Hurry.** The bot reacts ⏰ to the song with 5 seconds left.
 - **No repeats.** A song played in a chat isn't played there again for 30
   days.
 - **After the game.** For an hour, a reply to one of its messages gets
@@ -41,7 +42,7 @@ By default the songs are sung mainly in English, as the bot's model judges.
 
 ## Quick start
 
-You need signalbot main at `d685491` or newer, and Go 1.27 or newer.
+You need signalbot at `c755fc7` (branch `claude/mcp-addons-geoguess`, or main once it's merged) or newer (for the ⏰ reaction to its own post), and Go 1.27 or newer.
 
 1. **Build it:**
 
@@ -53,7 +54,8 @@ You need signalbot main at `d685491` or newer, and Go 1.27 or newer.
 
 2. **Add it to the MCP servers file** (`MCP_CONFIG`). It must be called
    `songs`. `chats: ["all"]` plays in every group; list group IDs to
-   limit it, and add `"dms": true` to play in DMs too. Keep the `model`
+   limit it, and add `"dms": true` to play in DMs too. `react` is for
+   the ⏰ on each song with 5 seconds left. Keep the `model`
    permission: the bot's model judges the answers and picks English
    songs. Without it, a stricter built-in match judges.
 
@@ -63,7 +65,7 @@ You need signalbot main at `d685491` or newer, and Go 1.27 or newer.
      "chat_commands": {"song": {"tool": "song", "direct": true, "example": "/song rock", "timeout": "60s"}},
      "addon": {
        "chats": ["all"],
-       "post": true, "watch": true,
+       "post": true, "react": true, "watch": true,
        "model": {"per_hour": 120, "max_tokens": 600}
      }
    }

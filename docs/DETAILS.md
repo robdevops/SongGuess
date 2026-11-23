@@ -83,8 +83,11 @@ add `"dms": true` to play in DMs too. The game needs:
 - `post`, for each song (a post with the clip as audio: on Telegram a voice
   message, on Signal an attachment), its reveal (a reply to the song, with
   the cover) and the results. The bot drops a post over the chat's post
-  `rate` for good, so the game asks for no reactions: two posts per song fit
-  the default rate;
+  `rate` for good, so answers get no reaction;
+- `react`, for the ⏰ the game puts on each song's post with 5 seconds
+  left. It counts against the same per-chat `rate` (by default 20 a minute,
+  burst 5): two posts and one reaction per song fit the default rate.
+  Without `react`, the bot fails the ⏰ op and the game plays on without it;
 - `watch`, to read the replies, and the reactions that join the lobby. A
   game is at most 10 songs of 2 minutes and a 15-minute lobby, so the
   default `watch_max` of 1h is enough.
@@ -226,6 +229,21 @@ their cancellation, and the outbox the bot reads. The game adds:
   (or `stop`) answers with the open song's reveal and the results itself
   and queues only the `unwatch`; in the lobby it calls the game off. A
   lobby called off for want of players posts why, then an `unwatch`.
+- 5 seconds before a song's deadline, the game queues
+  `{"op": "react", "chat": <chat>, "post": <the song's post's op ID>, "emoji": "⏰"}`:
+  a reaction to its own post, by the op ID, in place of a context's `ref`.
+  It needs the `react` permission and signalbot `c755fc7` (branch
+  `claude/mcp-addons-geoguess`, or main once it's merged) or newer; an
+  unknown post fails the op, with no retry. There's no ⏰ on a song that
+  ended early (everyone answered: its timer is stopped), after
+  `/song end`, on a song shorter than 10s (the game never posts one, as a
+  song's time is at least 10s), on a song with 5s or less left when the
+  game comes back from a restart (with more left, it is armed again), or
+  on a song whose post the outbox refused (it has no op ID). If the bot
+  dropped the song's post and sends it again later, the ⏰ can come first:
+  the bot fails it as an unknown post, and the song has no ⏰. Every song is
+  a post the game queued, so each has one: none is the `/song` call's
+  answer.
 - Ops the bot hasn't read are saved in `songs.json`, with their IDs, so they
   survive a restart. On start, games still open, and lobbies, get their
   timers back, a song whose time passed while the game was down is

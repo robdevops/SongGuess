@@ -444,7 +444,8 @@ func (s *server) tryPost(g *game) {
 	s.prepareNext(g)
 }
 
-// arm sets g's timer to reveal its open song once its time is up. s.mu is
+// arm sets g's timer to reveal its open song once its time is up, and its
+// warning to react ⏰ to the song's post warnBefore its deadline. s.mu is
 // held.
 func (s *server) arm(g *game) {
 	chat, id, current := g.Chat, g.ID, g.Current
@@ -452,6 +453,35 @@ func (s *server) arm(g *game) {
 		t.Stop()
 	}
 	s.timers[chat] = s.clock.AfterFunc(g.Deadline.Add(settle).Sub(s.clock.Now()), func() { s.timeUp(chat, id, current) })
+	s.armWarn(g)
+}
+
+// armWarn sets g's timer to react ⏰ to its open song's post warnBefore
+// its deadline, stopping any earlier one. A song shorter than warnMin, one
+// with warnBefore or less left (after a restart, or ended early: its
+// deadline is now), and one whose post has no ID (the outbox refused it)
+// get none. s.mu is held.
+func (s *server) armWarn(g *game) {
+	if t := s.warns[g.Chat]; t != nil {
+		t.Stop()
+		delete(s.warns, g.Chat)
+	}
+	wait := g.Deadline.Add(-warnBefore).Sub(s.clock.Now())
+	if g.Post == "" || g.Deadline.Sub(g.Opened) < warnMin || wait <= 0 {
+		return
+	}
+	chat, id, current, post, deadline := g.Chat, g.ID, g.Current, g.Post, g.Deadline
+	s.warns[chat] = s.clock.AfterFunc(wait, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		g := s.games[chat]
+		// The same song, still open, its deadline unmoved: not ended early.
+		if g == nil || g.ID != id || g.Current != current || g.Post != post || !g.Deadline.Equal(deadline) || g.judging {
+			return
+		}
+		delete(s.warns, chat)
+		s.queue(addon.Op{Op: "react", Chat: chat, Post: post, Emoji: "⏰"})
+	})
 }
 
 // timeUp reveals song current of the game id in chat, if it is still
@@ -646,7 +676,7 @@ func (s *server) end(g *game, now time.Time) string {
 	delete(s.games, g.Chat)
 	delete(s.media, g.ID)
 	s.stopGathering(g.ID)
-	for _, m := range []map[string]stopper{s.timers, s.asks} {
+	for _, m := range []map[string]stopper{s.timers, s.asks, s.warns} {
 		if t := m[g.Chat]; t != nil {
 			t.Stop()
 			delete(m, g.Chat)
@@ -825,7 +855,7 @@ func (s *server) callOffLocked(g *game, why string) {
 	delete(s.games, g.Chat)
 	delete(s.media, g.ID)
 	s.stopGathering(g.ID)
-	for _, m := range []map[string]stopper{s.timers, s.asks} {
+	for _, m := range []map[string]stopper{s.timers, s.asks, s.warns} {
 		if t := m[g.Chat]; t != nil {
 			t.Stop()
 			delete(m, g.Chat)

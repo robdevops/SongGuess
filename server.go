@@ -40,6 +40,7 @@ type server struct {
 	games     map[string]*game              // by chat
 	timers    map[string]stopper            // each game's reveal, by chat
 	asks      map[string]stopper            // each game's next song, posted after the gap, by chat
+	warns     map[string]stopper            // each game's ⏰ on its open song, warnBefore its deadline, by chat
 	gap       time.Duration                 // between a song's reveal and the next song: gapTime, or 0 in most tests
 	starting  map[string]bool               // chats whose game is being set up
 	media     map[string]map[int]media      // the clips and covers made ready, by game, then song
@@ -151,6 +152,10 @@ const (
 	// gapTime is the pause between a song's reveal and the next song, so
 	// players can read it.
 	gapTime = 10 * time.Second
+	// warnBefore is how long before a song's deadline the bot reacts ⏰
+	// to its post; a song shorter than warnMin gets no ⏰.
+	warnBefore = 5 * time.Second
+	warnMin    = 10 * time.Second
 )
 
 // newServer loads the state saved in cfg.StateDir, re-arms its games'
@@ -165,6 +170,7 @@ func newServer(cfg config, clk clock, rnd *mrand.Rand, client *http.Client, logg
 		games:     map[string]*game{},
 		timers:    map[string]stopper{},
 		asks:      map[string]stopper{},
+		warns:     map[string]stopper{},
 		gap:       cfg.gap,
 		starting:  map[string]bool{},
 		media:     map[string]map[int]media{},
