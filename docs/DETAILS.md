@@ -86,7 +86,7 @@ add `"dms": true` to play in DMs too. The game needs:
   `rate` for good, so the game asks for no reactions: two posts per song fit
   the default rate;
 - `watch`, to read the replies, and the reactions that join the lobby. A
-  game is at most 10 songs of 2 minutes and a 5-minute lobby, so the
+  game is at most 10 songs of 2 minutes and a 15-minute lobby, so the
   default `watch_max` of 1h is enough.
 
 ### Timeouts and fetching
@@ -199,7 +199,7 @@ their cancellation, and the outbox the bot reads. The game adds:
   `replies: true`, `reactions: true` with a lobby, no pattern,
   `tool: "song_answer"`, `over` (the "That song quiz is over" reply), until
   10s past the game's end (its songs' time, the pauses, 30s to spare for
-  fetching, and 5 minutes for a lobby).
+  fetching, and 15 minutes for a lobby).
 - Each song is a `post` of its own, with `audio`
   (`{"data": <base64 MP3>, "mimeType": "audio/mpeg"}`, the clip without ID3
   tags, which would name it); without a lobby, song 1 is queued during the

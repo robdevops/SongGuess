@@ -137,7 +137,7 @@ const (
 	// it needs, and how long it waits for them.
 	lobbyWait  = 30 * time.Second
 	minPlayers = 2
-	lobbyMax   = 5 * time.Minute
+	lobbyMax   = 15 * time.Minute
 	// fetchSlack is the time a game allows, in all, for songs that aren't
 	// ready when they are due.
 	fetchSlack = 30 * time.Second
