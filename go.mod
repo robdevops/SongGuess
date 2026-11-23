@@ -1,4 +1,4 @@
-module github.com/robdevops/chat-plugin-songs
+module github.com/robdevops/SongGuess
 
 go 1.27.0
 

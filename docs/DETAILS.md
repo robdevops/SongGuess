@@ -1,4 +1,4 @@
-# Songs: details
+# SongGuess: details
 
 The fine print behind the [README](../README.md): how the game judges
 answers, how it is built and run, what it keeps, and the protocol.

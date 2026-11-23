@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/robdevops/chat-plugin-songs/internal/state"
+	"github.com/robdevops/SongGuess/internal/state"
 	"github.com/robdevops/signalbot/addon"
 )
 

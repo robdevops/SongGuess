@@ -27,7 +27,7 @@ import (
 	"runtime/debug"
 	"syscall"
 
-	"github.com/robdevops/chat-plugin-songs/internal/httpx"
+	"github.com/robdevops/SongGuess/internal/httpx"
 )
 
 // maxLog is the size past which the log is moved aside at start, keeping

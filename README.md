@@ -1,4 +1,4 @@
-# Songs
+# SongGuess
 
 A song-guessing game for [signalbot](https://github.com/robdevops/signalbot).
 `/song` plays a few songs from a Deezer chart, each as a short clip. Players
@@ -45,8 +45,8 @@ You need signalbot main at `d685491` or newer, and Go 1.27 or newer.
 1. **Build it:**
 
    ```
-   git clone https://github.com/robdevops/chat-plugin-songs.git
-   cd chat-plugin-songs
+   git clone https://github.com/robdevops/SongGuess.git
+   cd SongGuess
    CGO_ENABLED=0 go build -ldflags='-s -w' -o /tmp/songs . && sudo install -D -m 755 /tmp/songs /opt/signalbot-addons/songs
    ```
 

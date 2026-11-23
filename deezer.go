@@ -43,7 +43,7 @@ const (
 )
 
 // userAgent names the game to Deezer, as it asks of API clients.
-const userAgent = "chat-plugin-songs/1 (+https://github.com/robdevops/chat-plugin-songs)"
+const userAgent = "SongGuess/1 (+https://github.com/robdevops/SongGuess)"
 
 // deezer is Deezer's public API, which needs no key: its genres, their
 // charts, and the previews and covers the charts link to.
