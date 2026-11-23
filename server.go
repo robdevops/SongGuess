@@ -150,7 +150,7 @@ const (
 	fetchSlack = 30 * time.Second
 	// gapTime is the pause between a song's reveal and the next song, so
 	// players can read it.
-	gapTime = 5 * time.Second
+	gapTime = 10 * time.Second
 )
 
 // newServer loads the state saved in cfg.StateDir, re-arms its games'

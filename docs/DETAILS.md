@@ -47,7 +47,7 @@ music, and holds no API key: Deezer's public API needs none.
   and the artist in the same one. Answers get no reaction.
 - **The reveal** replies to the song's message: "✅ **Title** — Artist",
   who got the title and who got the artist, and the album cover. Then a
-  5-second pause, and the next song.
+  10-second pause, and the next song.
 - **No waiting once everyone's in.** A song ends as soon as every player
   has answered (3s later, for answers still on their way): in a DM, as soon
   as you answer. With no lobby in a group (a bot that can't pass
@@ -221,7 +221,7 @@ their cancellation, and the outbox the bot reads. The game adds:
   `/song` call, so it follows the intro, and with one, when the lobby
   starts the game. When a song's time is up (3s after its deadline),
   the game queues its reveal as a post with `replyTo` the song's post and
-  the cover in `images`, then, 5 seconds later, the next song. After the
+  the cover in `images`, then, 10 seconds later, the next song. After the
   last, the results follow as a new post, then an `unwatch`. `/song end`
   (or `stop`) answers with the open song's reveal and the results itself
   and queues only the `unwatch`; in the lobby it calls the game off. A
