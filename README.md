@@ -22,7 +22,8 @@ scoreboard.
 - **Join.** In a group, react to the lobby message with any emoji. The
   player who starts it must react too. The game starts 30 seconds after
   the last player joins, once there are at least 2. It is called off if
-  fewer than 2 have joined after 15 minutes.
+  fewer than 2 have joined after 15 minutes. The songs are chosen while
+  players join; if that takes longer, the bot says it's getting them ready.
 - **DMs.** There is no lobby: the game starts at once. Any message is an
   answer.
 - **Answer.** In a group, reply to the song's message. Name the title, the

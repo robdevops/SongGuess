@@ -92,11 +92,15 @@ add `"dms": true` to play in DMs too. The game needs:
 ### Timeouts and fetching
 
 `"timeout": "60s"` gives `/song` time to fetch the chart and the first
-song's preview and cut it. The game gives up a few seconds before the bot's
-timeout and says so. The other songs are fetched in the background while
-the game plays, each before it is due; a track whose preview can't be
-fetched or cut is skipped for another from the chart, and if none can be,
-the game ends with the songs it has played.
+song's preview and cut it, in a DM or a group without a lobby. The game
+gives up a few seconds before the bot's timeout and says so. With a lobby,
+`/song` answers at once, and the chart, the model's pick of English songs
+and the first song's clip are made ready in the background while players
+join, for at most 2 minutes; if they fail, the game posts why and is
+off. The other songs are fetched in the background while the game plays,
+each before it is due; a track whose preview can't be fetched or cut is
+skipped for another from the chart, and if none can be, the game ends with
+the songs it has played.
 
 ### State directory, memory and network
 
@@ -162,7 +166,8 @@ address, and nothing about the chat or its players.
 
 `$SONGS_STATE_DIR/songs.json`, rewritten whole on each change:
 
-- open games: the chat's pseudonym, who started it, the genre, in the lobby
+- open games: the chat's pseudonym, who started it, the genre (or decade)
+  and Deezer's ID for it, whether its songs are still being chosen, in the lobby
   who has joined and when, the tracks chosen (Deezer's ID, title, artist
   and the preview's and cover's URLs), the open song's deadline, and for
   each player (a per-chat pseudonym) only their answer to the open song
@@ -193,13 +198,23 @@ their cancellation, and the outbox the bot reads. The game adds:
   `{reaction, removed}` for a lobby's reactions; the watch's tool), both
   for the bot alone, so neither is offered to the model.
 - `/song` checks that the bot offered `watchReplies` in the extension's
-  capability, fetches the chart and makes the first song ready before the
-  call's `deadline`, less 3s to reply.
+  capability and finds the genre (Deezer's genre list, kept for a day).
+  Without a lobby (a DM, or a bot that doesn't offer `watchReactions`), it
+  then fetches the chart and makes the first song ready before the call's
+  `deadline`, less 3s to reply. With a lobby, it answers with the intro at
+  once and does that in the background, for at most 2 minutes, sampling
+  the model outside the call, charged to the chat. If the lobby is ready
+  first, it posts "🎵 Getting the songs ready…" and posts song 1 once they
+  are; if they fail, it posts what `/song` would have answered (such as
+  Deezer being unreachable or the chart having run out), then an
+  `unwatch`. A lobby called off stops the choosing, and nothing more is
+  posted.
 - It answers with the intro and one watch for the whole game:
   `replies: true`, `reactions: true` with a lobby, no pattern,
   `tool: "song_answer"`, `over` (the "That song quiz is over" reply), until
   10s past the game's end (its songs' time, the pauses, 30s to spare for
-  fetching, and 15 minutes for a lobby).
+  fetching, and 15 minutes for a lobby, during which the songs are chosen,
+  or the 2 minutes for choosing them, if longer).
 - Each song is a `post` of its own, with `audio`
   (`{"data": <base64 MP3>, "mimeType": "audio/mpeg"}`, the clip without ID3
   tags, which would name it); without a lobby, song 1 is queued during the
@@ -215,4 +230,6 @@ their cancellation, and the outbox the bot reads. The game adds:
   survive a restart. On start, games still open, and lobbies, get their
   timers back, a song whose time passed while the game was down is
   revealed at once (without its cover), and the next song is fetched
-  again.
+  again. A game that was choosing its songs keeps its lobby (or its
+  players, if the lobby was over) and chooses them again from the start,
+  once the bot has redone its handshake, with 2 minutes more.

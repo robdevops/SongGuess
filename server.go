@@ -37,15 +37,16 @@ type server struct {
 	rand   *mrand.Rand
 
 	mu        sync.Mutex
-	games     map[string]*game         // by chat
-	timers    map[string]stopper       // each game's reveal, by chat
-	asks      map[string]stopper       // each game's next song, posted after the gap, by chat
-	gap       time.Duration            // between a song's reveal and the next song: gapTime, or 0 in most tests
-	starting  map[string]bool          // chats whose game is being set up
-	media     map[string]map[int]media // the clips and covers made ready, by game, then song
-	preparing map[string]bool          // games whose next song is being made ready
-	scores    map[string][]score       // by chat, the last scoreDays days
-	played    map[string][]stamp       // by chat, the tracks of the last playedDays days
+	games     map[string]*game              // by chat
+	timers    map[string]stopper            // each game's reveal, by chat
+	asks      map[string]stopper            // each game's next song, posted after the gap, by chat
+	gap       time.Duration                 // between a song's reveal and the next song: gapTime, or 0 in most tests
+	starting  map[string]bool               // chats whose game is being set up
+	media     map[string]map[int]media      // the clips and covers made ready, by game, then song
+	preparing map[string]bool               // games whose next song is being made ready
+	gathering map[string]context.CancelFunc // games whose songs are being chosen, to stop it
+	scores    map[string][]score            // by chat, the last scoreDays days
+	played    map[string][]stamp            // by chat, the tracks of the last playedDays days
 
 	saveMu sync.Mutex // one save at a time, so the last one written is the newest
 }
@@ -60,32 +61,35 @@ type media struct {
 // game is one chat's game. Its answers are kept only as right or wrong:
 // what anyone replied is never kept.
 type game struct {
-	ID       string            `json:"id"` // also the watch's
-	Chat     string            `json:"chat"`
-	Starter  string            `json:"starter"` // who may end it
-	Genre    string            `json:"genre,omitempty"`
-	Count    int               `json:"count"`           // the songs it will play; fewer than asked if the chart runs out
-	Asked    int               `json:"asked,omitempty"` // the songs /song asked for
-	Clip     time.Duration     `json:"clip"`            // each clip's length
-	Time     time.Duration     `json:"time"`            // to answer each song
-	Started  time.Time         `json:"started"`
-	End      time.Time         `json:"end"`     // when the last song is due to be revealed, with room to fetch songs
-	Songs    []track           `json:"songs"`   // made ready or played, in order
-	Pool     []track           `json:"pool"`    // the chart's tracks still to try
-	Current  int               `json:"current"` // the open song, from 0
-	Post     string            `json:"post"`    // the outbox op that posted it, for the reveal to reply to; "" until then
-	Opened   time.Time         `json:"opened"`  // when it was posted, or is due to be
-	Deadline time.Time         `json:"deadline"`
-	Answers  map[string]answer `json:"answers"`         // the open song's, by player
-	Players  []string          `json:"players"`         // who joined, or else who answered song 1: a song ends once they all have
-	Lobby    bool              `json:"lobby,omitempty"` // waiting for players to join by reacting to the intro
-	judging  bool              // the model is judging the open song's answers
-	Joined   []string          `json:"joined,omitempty"`   // who has joined
-	LastJoin time.Time         `json:"lastJoin,omitempty"` // when the last player joined: the game starts lobbyWait after
-	CallOff  time.Time         `json:"callOff,omitempty"`  // when the lobby gives up with fewer than minPlayers
-	Seq      int               `json:"seq"`                // the answers recorded so far, to break ties
-	Points   map[string]int    `json:"points"`             // by player
-	Right    map[string]int    `json:"right"`              // songs with something right, by player
+	ID        string            `json:"id"` // also the watch's
+	Chat      string            `json:"chat"`
+	Starter   string            `json:"starter"` // who may end it
+	Genre     string            `json:"genre,omitempty"`
+	Count     int               `json:"count"`           // the songs it will play; fewer than asked if the chart runs out
+	Asked     int               `json:"asked,omitempty"` // the songs /song asked for
+	Clip      time.Duration     `json:"clip"`            // each clip's length
+	Time      time.Duration     `json:"time"`            // to answer each song
+	Started   time.Time         `json:"started"`
+	End       time.Time         `json:"end"`     // when the last song is due to be revealed, with room to fetch songs
+	Songs     []track           `json:"songs"`   // made ready or played, in order
+	Pool      []track           `json:"pool"`    // the chart's tracks still to try
+	Current   int               `json:"current"` // the open song, from 0
+	Post      string            `json:"post"`    // the outbox op that posted it, for the reveal to reply to; "" until then
+	Opened    time.Time         `json:"opened"`  // when it was posted, or is due to be
+	Deadline  time.Time         `json:"deadline"`
+	Answers   map[string]answer `json:"answers"`             // the open song's, by player
+	Players   []string          `json:"players"`             // who joined, or else who answered song 1: a song ends once they all have
+	Lobby     bool              `json:"lobby,omitempty"`     // waiting for players to join by reacting to the intro
+	GenreID   int               `json:"genreId,omitempty"`   // the source of its songs: Deezer's genre (0 for all), for choosing them after a restart
+	Decade    string            `json:"decade,omitempty"`    // or the decade
+	Preparing bool              `json:"preparing,omitempty"` // its songs are being chosen, during the lobby, and after it if it takes longer
+	judging   bool              // the model is judging the open song's answers
+	Joined    []string          `json:"joined,omitempty"`   // who has joined
+	LastJoin  time.Time         `json:"lastJoin,omitempty"` // when the last player joined: the game starts lobbyWait after
+	CallOff   time.Time         `json:"callOff,omitempty"`  // when the lobby gives up with fewer than minPlayers
+	Seq       int               `json:"seq"`                // the answers recorded so far, to break ties
+	Points    map[string]int    `json:"points"`             // by player
+	Right     map[string]int    `json:"right"`              // songs with something right, by player
 }
 
 // answer is what one player's last answer to the open song got right, and
@@ -138,6 +142,9 @@ const (
 	lobbyWait  = 30 * time.Second
 	minPlayers = 2
 	lobbyMax   = 15 * time.Minute
+	// prepMax is how long a game with a lobby may take to choose its
+	// songs, in the background from the lobby's start.
+	prepMax = 2 * time.Minute
 	// fetchSlack is the time a game allows, in all, for songs that aren't
 	// ready when they are due.
 	fetchSlack = 30 * time.Second
@@ -148,7 +155,8 @@ const (
 
 // newServer loads the state saved in cfg.StateDir, re-arms its games'
 // timers, reveals at once the songs whose time passed while it was down,
-// and fetches again the songs that weren't posted yet.
+// fetches again the songs that weren't posted yet, and chooses again the
+// songs of games that were choosing them.
 func newServer(cfg config, clk clock, rnd *mrand.Rand, client *http.Client, logger *log.Logger) (*server, error) {
 	s := &server{
 		cfg: cfg, clock: clk, log: logger, rand: rnd,
@@ -161,6 +169,7 @@ func newServer(cfg config, clk clock, rnd *mrand.Rand, client *http.Client, logg
 		starting:  map[string]bool{},
 		media:     map[string]map[int]media{},
 		preparing: map[string]bool{},
+		gathering: map[string]context.CancelFunc{},
 		scores:    map[string][]score{},
 		played:    map[string][]stamp{},
 	}
@@ -194,6 +203,11 @@ func newServer(cfg config, clk clock, rnd *mrand.Rand, client *http.Client, logg
 		}
 		s.games[g.Chat] = g
 		switch {
+		case g.Preparing: // its songs are chosen again
+			if g.Lobby {
+				s.armLobby(g)
+			}
+			s.gatherGame(g)
 		case g.Lobby:
 			s.armLobby(g)
 		case g.Post == "": // its song wasn't posted yet: fetch it again, and post it when due

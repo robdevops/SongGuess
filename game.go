@@ -18,18 +18,20 @@ import (
 
 // The texts players see.
 const (
-	noChat      = "The song quiz works only in a chat."
-	noGame      = "There's no song quiz on. Start one with /song."
-	needsWatch  = "The song quiz needs a signalbot that takes reply watches: update the bot."
-	settingUp   = "A song quiz is being set up for this chat; give it a moment."
-	unreachable = "I couldn't reach Deezer just now. Try again in a minute."
-	tooSlow     = "Deezer was too slow just now. Try again."
-	noSongs     = "I couldn't get a song to play just now. Try again, or try another genre."
-	allPlayed   = "Every song in that chart was played here in the last 30 days. Try another genre."
-	badCount    = "A song quiz can have 1 to 10 songs, such as /song rock 5."
-	badClip     = "A clip can be 1s to 25s long, such as /song rock 10s."
-	notYet      = "Wait for the next song."
-	tooLate     = "Too late for that song."
+	noChat       = "The song quiz works only in a chat."
+	noGame       = "There's no song quiz on. Start one with /song."
+	needsWatch   = "The song quiz needs a signalbot that takes reply watches: update the bot."
+	settingUp    = "A song quiz is being set up for this chat; give it a moment."
+	unreachable  = "I couldn't reach Deezer just now. Try again in a minute."
+	tooSlow      = "Deezer was too slow just now. Try again."
+	noSongs      = "I couldn't get a song to play just now. Try again, or try another genre."
+	allPlayed    = "Every song in that chart was played here in the last 30 days. Try another genre."
+	badCount     = "A song quiz can have 1 to 10 songs, such as /song rock 5."
+	badClip      = "A clip can be 1s to 25s long, such as /song rock 10s."
+	notYet       = "Wait for the next song."
+	notStarted   = "The song quiz hasn't started yet."
+	gettingReady = "🎵 Getting the songs ready…"
+	tooLate      = "Too late for that song."
 )
 
 // usage is the help for /song.
@@ -166,11 +168,12 @@ func busy(g *game) addon.Result {
 	return addon.Text(fmt.Sprintf("A song quiz is on: song %d of %d.", g.Current+1, g.Count))
 }
 
-// start finds the chart of genreName (all genres if ""), makes its first
+// start finds the source of genreName (all genres if ""), makes its first
 // song ready and begins a game of n songs, answering with the intro and
 // the watch that takes the replies. The first song is a post of its own,
 // queued now, so it follows the intro; the rest are fetched in the
-// background, each before it is due.
+// background, each before it is due. In a group with a lobby, it answers
+// with the intro at once, and the songs are chosen while players join.
 func (s *server) start(ctx context.Context, c *addon.Context, genreName string, n int, length time.Duration) addon.Result {
 	s.mu.Lock()
 	if g := s.games[c.Chat]; g != nil {
@@ -200,58 +203,20 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 	}
 	gctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	failed := func(err error) addon.Result {
-		s.log.Printf("no game: %v", err)
-		if gctx.Err() != nil {
+	src, fail := s.findSource(gctx, genreName)
+	if fail != "" {
+		return addon.Text(fail)
+	}
+	if c.Group && s.srv.WatchReactions() { // players join by reacting to the intro first
+		if ctx.Err() != nil { // the bot gave up: it won't show the intro
+			s.log.Printf("game dropped: the bot stopped waiting")
 			return addon.Text(tooSlow)
 		}
-		return addon.Text(unreachable)
+		return s.openLobby(c, src, n, length)
 	}
-	chosen := genre{ID: 0}
-	var chart []track
-	var err error
-	if dec, ok := findDecade(genreName); ok {
-		chosen = genre{ID: -1, Name: dec.Label}
-		if chart, err = s.deezer.Decade(gctx, dec); err != nil {
-			return failed(err)
-		}
-	} else if genreName != "" {
-		genres, err := s.deezer.Genres(gctx)
-		if err != nil {
-			return failed(err)
-		}
-		g, ok := findGenre(genres, genreName)
-		if !ok {
-			return addon.Text(unknownGenre(genres))
-		}
-		chosen = g
-	}
-	switch {
-	case chosen.ID == gamesGenre: // the chart is mostly film songs: the editors' game playlists instead
-		if chart, err = s.deezer.Games(gctx); err != nil {
-			return failed(err)
-		}
-	case chosen.ID >= 0:
-		if chart, err = s.deezer.Chart(gctx, chosen.ID); err != nil {
-			return failed(err)
-		}
-	}
-	pool := s.pick(c.Chat, chart, 3*n+poolExtra) // more than needed: some may not be in English
-	pool = s.english(gctx, c.Chat, pool, chosen.ID == gamesGenre)
-	pool = pool[:min(len(pool), n+poolExtra)]
-	if len(pool) == 0 {
-		if len(chart) == 0 {
-			return addon.Text(noSongs)
-		}
-		return addon.Text(allPlayed)
-	}
-	t, m, pool, err := s.first(gctx, pool, length)
-	if err != nil {
-		s.log.Printf("no game: %v", err)
-		if errors.Is(err, errNoSong) {
-			return addon.Text(noSongs)
-		}
-		return addon.Text(tooSlow)
+	t, m, pool, fail := s.gather(gctx, c.Chat, src, n, length)
+	if fail != "" {
+		return addon.Text(fail)
 	}
 	if ctx.Err() != nil { // the bot gave up: it won't show the intro
 		s.log.Printf("game dropped: the bot stopped waiting")
@@ -265,32 +230,67 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 	}
 	now := s.clock.Now()
 	count := min(n, 1+len(pool))
-	g := &game{
-		ID: "s" + randomID(6), Chat: c.Chat, Starter: c.Sender, Genre: genreLabel(chosen),
-		Count: count, Asked: n, Clip: length, Time: s.cfg.Time,
-		Started: now, End: now.Add(time.Duration(count)*(s.cfg.Time+settle) + time.Duration(count-1)*s.gap + fetchSlack),
-		Songs: []track{t}, Pool: pool, Opened: now,
-		Answers: map[string]answer{}, Points: map[string]int{}, Right: map[string]int{},
-	}
-	if chosen.ID == 0 {
-		g.Genre = ""
-	}
+	g := s.newGame(c, src, n, length, now)
+	g.Count, g.End = count, now.Add(s.playTime(count))
+	g.Songs, g.Pool = []track{t}, pool
 	s.games[c.Chat] = g
 	s.media[g.ID] = map[int]media{0: m}
-	if c.Group && s.srv.WatchReactions() { // players join by reacting to the intro first
-		g.Lobby, g.Joined, g.CallOff = true, nil, now.Add(lobbyMax)
-		g.End = g.End.Add(lobbyMax)
-		s.armLobby(g)
-	} else {
-		if !c.Group { // a DM: its one player, so no song waits for the timer
-			g.Players = []string{c.Sender}
-		}
-		s.tryPost(g)
+	if !c.Group { // a DM: its one player, so no song waits for the timer
+		g.Players = []string{c.Sender}
 	}
+	s.tryPost(g)
 	text := intro(g)
 	s.mu.Unlock()
 	s.save()
 	s.log.Printf("game %s started: %d songs, %s clips, %s to answer", g.ID, count, length, g.Time)
+	return s.introResult(g, text)
+}
+
+// openLobby begins a game of n songs in its lobby, answering at once with
+// the intro and the watch; its songs are chosen in the background
+// meanwhile, and it starts once both are done.
+func (s *server) openLobby(c *addon.Context, src source, n int, length time.Duration) addon.Result {
+	s.mu.Lock()
+	if g := s.games[c.Chat]; g != nil {
+		s.mu.Unlock()
+		return busy(g)
+	}
+	now := s.clock.Now()
+	g := s.newGame(c, src, n, length, now)
+	// Preparing overlaps the lobby: only what it may take past it counts.
+	g.End = now.Add(max(lobbyMax, prepMax) + s.playTime(n))
+	g.Lobby, g.CallOff, g.Preparing = true, now.Add(lobbyMax), true
+	s.games[c.Chat] = g
+	s.armLobby(g)
+	s.gatherGame(g)
+	text := intro(g)
+	s.mu.Unlock()
+	s.save()
+	s.log.Printf("game %s opened its lobby: %d songs, %s clips, %s to answer", g.ID, n, length, g.Time)
+	return s.introResult(g, text)
+}
+
+// newGame is a game of n songs from src for c's chat, started by c's
+// sender at now, with no songs yet. Its End is the caller's to set.
+func (s *server) newGame(c *addon.Context, src source, n int, length time.Duration, now time.Time) *game {
+	return &game{
+		ID: "s" + randomID(6), Chat: c.Chat, Starter: c.Sender, Genre: src.label(),
+		GenreID: src.genre, Decade: src.decade,
+		Count: n, Asked: n, Clip: length, Time: s.cfg.Time,
+		Started: now, Opened: now,
+		Answers: map[string]answer{}, Points: map[string]int{}, Right: map[string]int{},
+	}
+}
+
+// playTime is how long count songs take to play: each one's time and
+// settle, the gaps between them, and fetchSlack.
+func (s *server) playTime(count int) time.Duration {
+	return time.Duration(count)*(s.cfg.Time+settle) + time.Duration(count-1)*s.gap + fetchSlack
+}
+
+// introResult is the answer to /song that begins g: text, its intro, and
+// the watch that takes the replies, and in a lobby the reactions.
+func (s *server) introResult(g *game, text string) addon.Result {
 	return addon.Result{
 		Content: addon.Text(clamp(text, maxPost)).Content,
 		Meta: &addon.ResultMeta{Watch: &addon.Watch{
@@ -418,7 +418,7 @@ func lengthLabel(d time.Duration) string {
 // s.mu is held.
 func (s *server) tryPost(g *game) {
 	now := s.clock.Now()
-	if g.Lobby || g.Post != "" || now.Before(g.Opened) {
+	if g.Lobby || g.Preparing || g.Post != "" || now.Before(g.Opened) {
 		return
 	}
 	m, ok := s.media[g.ID][g.Current]
@@ -616,7 +616,7 @@ func (s *server) finish(c *addon.Context) addon.Result {
 	case g.Starter != c.Sender:
 		s.mu.Unlock()
 		return addon.Text("Only the player who started this song quiz can end it.")
-	case g.Lobby:
+	case g.Lobby || g.Preparing:
 		s.callOffLocked(g, "")
 		s.mu.Unlock()
 		s.save()
@@ -645,6 +645,7 @@ func (s *server) finishLocked(g *game, ops []addon.Op) {
 func (s *server) end(g *game, now time.Time) string {
 	delete(s.games, g.Chat)
 	delete(s.media, g.ID)
+	s.stopGathering(g.ID)
 	for _, m := range []map[string]stopper{s.timers, s.asks} {
 		if t := m[g.Chat]; t != nil {
 			t.Stop()
@@ -710,9 +711,9 @@ func (s *server) answer(c *addon.Context, msg string) addon.Result {
 	case g == nil:
 		s.mu.Unlock()
 		return addon.Text(noGame)
-	case g.Lobby:
+	case g.Lobby || g.Preparing:
 		s.mu.Unlock()
-		return addon.Text("The song quiz hasn't started yet.")
+		return addon.Text(notStarted)
 	case c.Sent > 0 && c.Sent < g.Started.Unix():
 		s.mu.Unlock()
 		return addon.Text("That message is from before this song quiz.")
@@ -799,6 +800,9 @@ func (s *server) armLobby(g *game) {
 			g.Lobby, g.Players = false, slices.Clone(g.Joined)
 			g.Started, g.Opened = now, now
 			s.log.Printf("game %s began: %d players", g.ID, len(g.Players))
+			if g.Preparing { // song 1 comes once its songs are chosen
+				s.queue(addon.Op{Op: "post", Chat: g.Chat, Text: gettingReady})
+			}
 			s.tryPost(g)
 		case len(g.Joined) < minPlayers && !now.Before(g.CallOff):
 			s.callOffLocked(g, "Not enough players joined, so the song quiz is off.")
@@ -810,8 +814,9 @@ func (s *server) armLobby(g *game) {
 	})
 }
 
-// callOffLocked ends g in its lobby, saying why if why isn't "", and ends
-// its watch. s.mu is held.
+// callOffLocked ends g before its first song, in its lobby or while its
+// songs are chosen, which stops, saying why if why isn't "", and ends its
+// watch. s.mu is held.
 func (s *server) callOffLocked(g *game, why string) {
 	if why != "" {
 		s.queue(addon.Op{Op: "post", Chat: g.Chat, Text: why})
@@ -819,13 +824,14 @@ func (s *server) callOffLocked(g *game, why string) {
 	s.queue(addon.Op{Op: "unwatch", Chat: g.Chat, Watch: g.ID})
 	delete(s.games, g.Chat)
 	delete(s.media, g.ID)
+	s.stopGathering(g.ID)
 	for _, m := range []map[string]stopper{s.timers, s.asks} {
 		if t := m[g.Chat]; t != nil {
 			t.Stop()
 			delete(m, g.Chat)
 		}
 	}
-	s.log.Printf("game %s called off in its lobby: %d joined", g.ID, len(g.Joined))
+	s.log.Printf("game %s called off before it began: %d joined", g.ID, len(g.Joined))
 }
 
 // allAnswered reports whether a song after the first has an answer from

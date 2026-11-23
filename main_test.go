@@ -126,6 +126,30 @@ type fakeDeezer struct {
 	failing  map[int64]bool     // tracks whose preview fails
 	noCover  map[int64]bool
 	requests []string
+	hold     chan struct{} // if set, charts and playlists wait for it to close
+	dropped  int           // the held requests given up on by the game
+}
+
+// block holds charts and playlists until release.
+func (d *fakeDeezer) block() {
+	d.mu.Lock()
+	d.hold = make(chan struct{})
+	d.mu.Unlock()
+}
+
+// release lets the held charts and playlists go.
+func (d *fakeDeezer) release() {
+	d.mu.Lock()
+	close(d.hold)
+	d.hold = nil
+	d.mu.Unlock()
+}
+
+// gaveUp is the number of held requests the game gave up on.
+func (d *fakeDeezer) gaveUp() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.dropped
 }
 
 func newFakeDeezer(t *testing.T) *fakeDeezer {
@@ -156,6 +180,19 @@ func newFakeDeezer(t *testing.T) *fakeDeezer {
 			strings.HasPrefix(path, "/playlist/") && strings.HasSuffix(path, "/tracks"):
 			if r.URL.Query().Get("limit") != "100" {
 				t.Errorf("chart %s", r.URL)
+			}
+			d.mu.Lock()
+			hold := d.hold
+			d.mu.Unlock()
+			if hold != nil {
+				select {
+				case <-hold:
+				case <-r.Context().Done():
+					d.mu.Lock()
+					d.dropped++
+					d.mu.Unlock()
+					return
+				}
 			}
 			key := strings.TrimSuffix(strings.TrimPrefix(path, "/chart/"), "/tracks")
 			if strings.HasPrefix(path, "/playlist/") {
@@ -490,12 +527,13 @@ func (c *client) note() string {
 	return ""
 }
 
-// ready waits until no song is being fetched in the background.
+// ready waits until no song is being fetched, nor a game's songs chosen,
+// in the background.
 func (c *client) ready() {
 	c.t.Helper()
 	for range 500 {
 		c.s.mu.Lock()
-		n := len(c.s.preparing)
+		n := len(c.s.preparing) + len(c.s.gathering)
 		c.s.mu.Unlock()
 		if n == 0 {
 			return
@@ -1421,6 +1459,7 @@ func TestLobby(t *testing.T) {
 	c := connect(t, testServer(t, t.TempDir(), clk, logs, d.srv.URL))
 	c.initializeWith(true, true)
 	r := c.song("2", from(clk, chat, alice))
+	c.ready()
 	if !strings.Contains(words(r), "React to this message with any emoji to join") || !strings.Contains(words(r), "whoever started it too") || !r.Meta.Watch.Reactions || !strings.HasSuffix(r.Meta.Watch.Over, "is over. Start another with /song.") {
 		t.Fatalf("intro %+v", r)
 	}
@@ -1630,5 +1669,244 @@ func TestGamesSource(t *testing.T) {
 	}
 	if !slices.Contains(d.fetched(), "/playlist/4380597982/tracks?limit=100") || slices.Contains(d.fetched(), "/chart/173/tracks?limit=100") {
 		t.Errorf("requests %v", d.fetched())
+	}
+}
+
+// lobby is a fake clock, a fake Deezer whose charts are held, and a
+// client whose bot passes reactions, so a group's game has a lobby.
+func lobby(t *testing.T) (*fakeClock, *client, *fakeDeezer, *syncBuffer) {
+	t.Helper()
+	clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+	logs := &syncBuffer{}
+	d := newFakeDeezer(t)
+	d.block()
+	c := connect(t, testServer(t, t.TempDir(), clk, logs, d.srv.URL))
+	c.initializeWith(true, true)
+	return clk, c, d, logs
+}
+
+// asked waits until Deezer has had a request for a chart.
+func (d *fakeDeezer) asked(t *testing.T) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if slices.ContainsFunc(d.fetched(), func(u string) bool { return strings.HasPrefix(u, "/chart/") }) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no chart asked for")
+		}
+	}
+}
+
+// With a lobby, /song answers with the intro at once, while Deezer holds
+// the chart, and its watch covers the lobby and the songs; songs chosen
+// during the lobby, song 1 comes as the countdown ends.
+func TestLobbyAtOnce(t *testing.T) {
+	clk, c, d, _ := lobby(t)
+	start := clk.Now()
+	r := c.song("2", from(clk, chat, alice))
+	if !strings.Contains(words(r), "React to this message") || r.Meta == nil || r.Meta.Watch == nil || !r.Meta.Watch.Reactions {
+		t.Fatalf("intro %+v", r)
+	}
+	want := start.Add(lobbyMax + 2*(30*time.Second+settle) + fetchSlack + watchSlack).Format(time.RFC3339)
+	if r.Meta.Watch.Until != want {
+		t.Errorf("until %s, want %s", r.Meta.Watch.Until, want)
+	}
+	d.asked(t)
+	if words(c.reply("anything", from(clk, chat, bob))) != notStarted {
+		t.Error("an answer while the songs are chosen")
+	}
+	d.release()
+	c.ready()
+	c.react(false, from(clk, chat, alice))
+	c.react(false, from(clk, chat, bob))
+	clk.Advance(lobbyWait)
+	c.note()
+	page := c.outbox("0")
+	if len(page.Ops) != 1 {
+		t.Fatalf("ops %+v", page)
+	}
+	checkSong(t, page.Ops[0], 1, 2)
+}
+
+// When the lobby is ready before the songs, one post says so, and song 1
+// comes as soon as they are.
+func TestLobbyReadyFirst(t *testing.T) {
+	clk, c, d, _ := lobby(t)
+	c.song("2", from(clk, chat, alice))
+	d.asked(t)
+	c.react(false, from(clk, chat, alice))
+	c.react(false, from(clk, chat, bob))
+	clk.Advance(lobbyWait)
+	page := c.outbox("0")
+	if len(page.Ops) != 1 || page.Ops[0].Text != gettingReady || page.Ops[0].Audio != nil {
+		t.Fatalf("ops %+v", page)
+	}
+	if words(c.reply("anything", from(clk, chat, bob))) != notStarted {
+		t.Error("an answer while the songs are chosen")
+	}
+	clk.Advance(time.Minute) // the time it takes
+	d.release()
+	waitFor(t, c.s, "song 1", func() bool { g := c.s.games[chat]; return g != nil && g.Post != "" })
+	p := c.outbox(page.Cursor)
+	if len(p.Ops) != 1 {
+		t.Fatalf("ops %+v", p)
+	}
+	checkSong(t, p.Ops[0], 1, 2)
+	c.s.mu.Lock()
+	g := c.s.games[chat]
+	if !slices.Equal(g.Players, []string{alice, bob}) || !g.Deadline.Equal(clk.Now().Add(30*time.Second)) {
+		t.Errorf("players %v, deadline %v", g.Players, g.Deadline)
+	}
+	c.s.mu.Unlock()
+}
+
+// When no songs can be chosen, the game posts why, as /song would have
+// answered, and ends its watch.
+func TestLobbyNoSongs(t *testing.T) {
+	clk, c, d, logs := lobby(t)
+	d.mu.Lock()
+	d.charts["0"] = nil
+	d.mu.Unlock()
+	c.song("2", from(clk, chat, alice))
+	c.react(false, from(clk, chat, alice))
+	d.release()
+	waitFor(t, c.s, "the call-off", func() bool { return c.s.games[chat] == nil })
+	page := c.outbox("0")
+	if len(page.Ops) != 2 || page.Ops[0].Text != noSongs || page.Ops[1].Op != "unwatch" || page.Ops[1].Watch == "" {
+		t.Fatalf("ops %+v", page)
+	}
+	if !strings.Contains(logs.String(), "no songs to play") {
+		t.Errorf("log:\n%s", logs)
+	}
+	clk.Advance(lobbyMax)
+	if p := c.outbox(page.Cursor); len(p.Ops) != 0 {
+		t.Errorf("after the call-off %+v", p)
+	}
+}
+
+// A lobby called off, by its starter or for want of players, stops
+// choosing its songs, and nothing more is posted.
+func TestLobbyOffStopsChoosing(t *testing.T) {
+	for _, by := range []string{"end", "players"} {
+		t.Run(by, func(t *testing.T) {
+			clk, c, d, _ := lobby(t)
+			c.song("2", from(clk, chat, alice))
+			d.asked(t)
+			if by == "end" {
+				if got := words(c.song("end", from(clk, chat, alice))); got != "The song quiz is off." {
+					t.Fatalf("end %q", got)
+				}
+			} else {
+				clk.Advance(lobbyMax)
+			}
+			c.ready()
+			for deadline := time.Now().Add(5 * time.Second); d.gaveUp() == 0; time.Sleep(5 * time.Millisecond) {
+				if time.Now().After(deadline) {
+					t.Fatal("the chart's request wasn't given up")
+				}
+			}
+			done := make(chan struct{})
+			go func() { c.s.bg.Wait(); close(done) }() // the choosing has seen the game is off
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the choosing didn't stop")
+			}
+			c.close()
+			ops := c.s.srv.Outbox()
+			last := ops[len(ops)-1].Op
+			if last.Op != "unwatch" || len(ops) > 2 {
+				t.Errorf("ops %+v", ops)
+			}
+			if slices.ContainsFunc(d.fetched(), func(u string) bool { return strings.HasPrefix(u, "/preview/") }) {
+				t.Error("a preview fetched")
+			}
+			d.release()
+		})
+	}
+}
+
+// A restart while the songs are chosen keeps the game, lobby or players,
+// and chooses them again only once the bot is back.
+func TestRestartChoosing(t *testing.T) {
+	for _, lobbyOver := range []bool{false, true} {
+		t.Run(fmt.Sprint("lobby over ", lobbyOver), func(t *testing.T) {
+			clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+			dir := t.TempDir()
+			var logs syncBuffer
+			d := newFakeDeezer(t)
+			d.block()
+			c := connect(t, testServer(t, dir, clk, &logs, d.srv.URL))
+			c.initializeWith(true, true)
+			c.song("2", from(clk, chat, alice))
+			d.asked(t)
+			c.react(false, from(clk, chat, alice))
+			if lobbyOver {
+				c.react(false, from(clk, chat, bob))
+				clk.Advance(lobbyWait)
+				page := c.outbox("0")
+				if len(page.Ops) != 1 || page.Ops[0].Text != gettingReady {
+					t.Fatalf("ops %+v", page)
+				}
+				c.outbox(page.Cursor) // the bot has it
+			}
+			c.close()
+			d.release()
+			asked := len(d.fetched())
+
+			clk = &fakeClock{now: clk.Now().Add(10 * time.Second)}
+			c = connect(t, testServer(t, dir, clk, &logs, d.srv.URL))
+			c.s.mu.Lock()
+			g := c.s.games[chat]
+			if g == nil || g.Lobby == lobbyOver || !g.Preparing || !slices.Contains(g.Joined, alice) {
+				t.Fatalf("after the restart %+v", g)
+			}
+			c.s.mu.Unlock()
+			time.Sleep(100 * time.Millisecond) // time enough to ask Deezer, were it not waiting for the bot
+			if got := len(d.fetched()); got != asked {
+				t.Fatalf("%d requests before the bot was back", got-asked)
+			}
+			c.initializeWith(true, true)
+			c.ready()
+			if !lobbyOver {
+				c.react(false, from(clk, chat, bob))
+				clk.Advance(lobbyWait)
+			}
+			c.note()
+			page := c.outbox("0") // no second post that the songs are coming
+			if len(page.Ops) != 1 {
+				t.Fatalf("ops %+v", page)
+			}
+			checkSong(t, page.Ops[0], 1, 2)
+		})
+	}
+}
+
+// In a DM, and in a group whose bot can't pass reactions, /song still
+// chooses the songs first: it answers with song 1 queued.
+func TestNoLobbyChoosesFirst(t *testing.T) {
+	for _, reactions := range []bool{true, false} {
+		clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+		d := newFakeDeezer(t)
+		c := connect(t, testServer(t, t.TempDir(), clk, io.Discard, d.srv.URL))
+		c.initializeWith(true, reactions)
+		ctx := from(clk, chat, alice)
+		ctx.Group = !reactions // a DM, or a group without a lobby
+		r := c.song("2", ctx)
+		if strings.Contains(words(r), "React to") || r.Meta == nil || r.Meta.Watch.Reactions {
+			t.Errorf("intro %+v", r)
+		}
+		page := c.outbox("0")
+		if len(page.Ops) != 1 {
+			t.Fatalf("ops %+v", page)
+		}
+		checkSong(t, page.Ops[0], 1, 2)
+		c.s.mu.Lock()
+		if g := c.s.games[chat]; g == nil || g.Preparing || len(c.s.gathering) != 0 {
+			t.Errorf("game %+v", g)
+		}
+		c.s.mu.Unlock()
+		c.close()
 	}
 }

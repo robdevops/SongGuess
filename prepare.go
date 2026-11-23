@@ -87,14 +87,15 @@ func (s *server) first(ctx context.Context, pool []track, length time.Duration) 
 }
 
 // prepareNext starts making ready, in the background, the song g plays
-// next, unless it is ready, being made ready, or past the game's end.
+// next, unless it is ready, being made ready, or past the game's end, or
+// the game's songs are still being chosen.
 // s.mu is held.
 func (s *server) prepareNext(g *game) {
 	k := g.Current
 	if g.Post != "" {
 		k++
 	}
-	if k >= g.Count || s.preparing[g.ID] {
+	if g.Preparing || k >= g.Count || s.preparing[g.ID] {
 		return
 	}
 	if _, ok := s.media[g.ID][k]; ok {
@@ -259,6 +260,184 @@ func isLatin(s string) bool {
 	for _, r := range s {
 		if unicode.IsLetter(r) && !unicode.Is(unicode.Latin, r) {
 			return false
+		}
+	}
+	return true
+}
+
+// source is where a game's songs come from: a decade's hits if decade
+// isn't "", else genre's chart (0 for all genres; gamesGenre is the
+// editors' game playlists).
+type source struct {
+	genre  int
+	name   string // the genre's label
+	decade string // the decade's label
+}
+
+// label is src as the intro names it: "" for all genres.
+func (src source) label() string {
+	switch {
+	case src.decade != "":
+		return src.decade
+	case src.genre == 0:
+		return ""
+	}
+	return src.name
+}
+
+// source is g's source of songs.
+func (g *game) source() source {
+	return source{genre: g.GenreID, name: g.Genre, decade: g.Decade}
+}
+
+// findSource is the source /song names: a decade, a genre of Deezer's
+// list (fetched, unless it is kept), or all genres if name is "". It fails
+// with the text to answer.
+func (s *server) findSource(ctx context.Context, name string) (source, string) {
+	if dec, ok := findDecade(name); ok {
+		return source{decade: dec.Label}, ""
+	}
+	if name == "" {
+		return source{}, ""
+	}
+	genres, err := s.deezer.Genres(ctx)
+	if err != nil {
+		return source{}, s.failText(ctx, err)
+	}
+	g, ok := findGenre(genres, name)
+	if !ok {
+		return source{}, unknownGenre(genres)
+	}
+	return source{genre: g.ID, name: genreLabel(g)}, ""
+}
+
+// failText logs why no game could start and is the text that says so:
+// Deezer was too slow if ctx ended, else unreachable.
+func (s *server) failText(ctx context.Context, err error) string {
+	s.log.Printf("no game: %v", err)
+	if ctx.Err() != nil {
+		return tooSlow
+	}
+	return unreachable
+}
+
+// gather chooses a game's songs: src's tracks not played in chat lately,
+// in English, up to n+poolExtra of them, and makes the first ready. It
+// returns the first, its media and the tracks left, or the text that says
+// why there are none.
+func (s *server) gather(ctx context.Context, chat string, src source, n int, length time.Duration) (track, media, []track, string) {
+	var chart []track
+	var err error
+	switch {
+	case src.decade != "":
+		dec, ok := findDecade(src.decade)
+		if !ok {
+			return track{}, media{}, nil, noSongs
+		}
+		chart, err = s.deezer.Decade(ctx, dec)
+	case src.genre == gamesGenre: // the chart is mostly film songs: the editors' game playlists instead
+		chart, err = s.deezer.Games(ctx)
+	default:
+		chart, err = s.deezer.Chart(ctx, src.genre)
+	}
+	if err != nil {
+		return track{}, media{}, nil, s.failText(ctx, err)
+	}
+	pool := s.pick(chat, chart, 3*n+poolExtra) // more than needed: some may not be in English
+	pool = s.english(ctx, chat, pool, src.genre == gamesGenre)
+	pool = pool[:min(len(pool), n+poolExtra)]
+	if len(pool) == 0 {
+		if len(chart) == 0 {
+			return track{}, media{}, nil, noSongs
+		}
+		return track{}, media{}, nil, allPlayed
+	}
+	t, m, pool, err := s.first(ctx, pool, length)
+	if err != nil {
+		s.log.Printf("no game: %v", err)
+		if errors.Is(err, errNoSong) {
+			return track{}, media{}, nil, noSongs
+		}
+		return track{}, media{}, nil, tooSlow
+	}
+	return t, m, pool, ""
+}
+
+// gatherGame starts choosing g's songs in the background, for at most
+// prepMax, or until g ends or the server stops. s.mu is held.
+func (s *server) gatherGame(g *game) {
+	ctx, cancel := context.WithTimeout(s.ctx, prepMax)
+	s.stopGathering(g.ID)
+	s.gathering[g.ID] = cancel
+	chat, id, src, n, length := g.Chat, g.ID, g.source(), g.Asked, g.Clip
+	s.bg.Add(1)
+	go func() {
+		defer s.bg.Done()
+		defer cancel()
+		s.gathered(ctx, chat, id, src, n, length)
+	}()
+}
+
+// stopGathering stops choosing the songs of the game id, if it is. s.mu
+// is held.
+func (s *server) stopGathering(id string) {
+	if cancel := s.gathering[id]; cancel != nil {
+		cancel()
+		delete(s.gathering, id)
+	}
+}
+
+// gathered chooses the songs of the game id in chat, once the bot has
+// said what it offers, and gives them to the game, starting it if its
+// lobby is over; if there are none, it calls the game off, saying why. A
+// game that ended meanwhile is left alone, and one the server stopped
+// during is chosen again after the restart.
+func (s *server) gathered(ctx context.Context, chat, id string, src source, n int, length time.Duration) {
+	var t track
+	var m media
+	var pool []track
+	fail := noSongs // the bot never came back in time
+	if s.waitForBot(ctx) {
+		t, m, pool, fail = s.gather(ctx, chat, src, n, length)
+	}
+	if s.ctx.Err() != nil {
+		return
+	}
+	s.mu.Lock()
+	g := s.games[chat]
+	if g == nil || g.ID != id || !g.Preparing {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.gathering, id)
+	if fail != "" {
+		s.log.Printf("game %s: no songs to play", id)
+		s.callOffLocked(g, fail)
+		s.mu.Unlock()
+		s.save()
+		return
+	}
+	g.Preparing = false
+	g.Songs, g.Pool, g.Count = []track{t}, pool, min(n, 1+len(pool))
+	s.media[id] = map[int]media{0: m}
+	s.log.Printf("game %s ready: %d songs", id, g.Count)
+	if !g.Lobby { // its players were waiting for the songs
+		g.Opened = s.clock.Now()
+		s.tryPost(g)
+	}
+	s.mu.Unlock()
+	s.save()
+}
+
+// waitForBot waits until the bot has said, in its handshake, what it
+// offers, as it may not have yet just after a restart; false if ctx ends
+// first.
+func (s *server) waitForBot(ctx context.Context) bool {
+	for !s.srv.WatchReplies() {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(50 * time.Millisecond):
 		}
 	}
 	return true
