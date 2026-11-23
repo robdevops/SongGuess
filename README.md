@@ -47,7 +47,7 @@ You need signalbot main at `d685491` or newer, and Go 1.27 or newer.
    ```
    git clone https://github.com/robdevops/chat-plugin-songs.git
    cd chat-plugin-songs
-   CGO_ENABLED=0 go build -ldflags='-s -w' -o /opt/signalbot-addons/songs .
+   CGO_ENABLED=0 go build -ldflags='-s -w' -o /tmp/songs . && sudo install -D -m 755 /tmp/songs /opt/signalbot-addons/songs
    ```
 
 2. **Add it to the MCP servers file** (`MCP_CONFIG`). It must be called
