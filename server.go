@@ -92,12 +92,9 @@ type game struct {
 	CallOff   time.Time         `json:"callOff,omitempty"`  // when the lobby gives up with fewer than minPlayers, or, with buttons, unstarted
 	// Buttons: its lobby shows buttons, so it has no countdown: the
 	// starter starts it, and may first toggle its songs (Asked) between
-	// the lobby's first number, BaseSongs, and double that, and its time
-	// to answer each song (Time) between the lobby's first, BaseTime, and
-	// double that; BaseTime is 0 in a lobby opened before that toggle.
-	Buttons   bool          `json:"buttons,omitempty"`
-	BaseSongs int           `json:"baseSongs,omitempty"`
-	BaseTime  time.Duration `json:"baseTime,omitempty"`
+	// the lobby's first number, BaseSongs, and double that.
+	Buttons   bool `json:"buttons,omitempty"`
+	BaseSongs int  `json:"baseSongs,omitempty"`
 	// The songs, and the clip length, its songs were chosen for.
 	Gathered     int            `json:"gathered,omitempty"`
 	GatheredClip time.Duration  `json:"gatheredClip,omitempty"`

@@ -236,25 +236,21 @@ their cancellation, and the outbox the bot reads. The game adds:
   15 minutes) posts why, then an `unwatch`.
 - Where the bot offers `buttons`, the lobby's answer has one row,
   `onPress: "song_press"`: `✅ N` (Ready, `ready:<id>`, anyone's),
-  `Songs: N` (`t1:<id>`), `Interval: Ns` (`i:<id>`), `▶️` (Start, `start:<id>`, shown from 2
+  `Songs: N` (`t1:<id>`), `▶️` (Start, `start:<id>`, shown from 2
   players) and `✖️` (Cancel, `cancel:<id>`), `<id>` the watch's; an
   older lobby's `Clip` toggle (`t2:<id>`) answers "That button is gone."
   and changes nothing. The lobby then has no countdown: only ▶️ or
   `/song start` starts it, and `/song wait` (or an older lobby's
   `wait:<id>`) says there's none. The `Songs` toggle switches between the
   number the lobby opened with and double it, capped at 10 (one mode if
-  already there); the `Interval` toggle likewise switches the time to
-  answer each song, written in whole seconds, between `SONGS_TIME` and
-  double it, capped at 2 minutes (one mode if already there; in a lobby
-  opened before it had the toggle, `i:<id>` answers "That button is
-  gone."), and the game that starts gives each song that time; a toggle saves the game and, if the songs already
+  already there); a toggle saves the game and, if the songs already
   chosen were chosen for fewer, or are
   still being chosen, chooses them again in the background. Every change
   of the players or a toggle queues
   `{"op": "buttons", "chat": <chat>, "watch": <id>, "buttons": [[…]]}`
   with the new row (signalbot `f6a3c5c` or newer; elsewhere a no-op). The
   watch runs long enough for double the songs, chosen again at the
-  lobby's last moment, each with double the time to answer.
+  lobby's last moment.
 - 5 seconds before a song's deadline, the game queues
   `{"op": "react", "chat": <chat>, "post": <the song's post's op ID>, "emoji": "⏰"}`:
   a reaction to its own post, by the op ID, in place of a context's `ref`.
