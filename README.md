@@ -21,7 +21,7 @@ scoreboard.
 
 ## How to play
 
-- **Join.** In a group, press ✋ Ready under the lobby message on
+- **Join.** In a group, press ✅ under the lobby message on
   Telegram, Discord and Slack, or react to it with any emoji (on Signal,
   the only way). Each player joins for themselves; the player who starts
   it must join too. On Signal the game starts 30 seconds after the last
@@ -30,15 +30,16 @@ scoreboard.
   join; if that takes longer, the bot says it's getting them ready.
 - **Lobby buttons.** Where the bot's network shows buttons (Telegram,
   Discord, Slack), the lobby message has one row:
-  `✋ Ready: N` · `Songs: N` · `Clip: Ns` · `▶️ Start` · `✖️ Cancel`.
-  ✋ Ready is anyone's, and shows how many have joined (a pop-up says so,
-  or that you're already in). The rest are the player who started it's:
-  `Songs` and `Clip` each switch between what the game was opened
-  with (`SONGS_SONGS`, or what `/song` was typed with) and double that, up
-  to the game's most (10 songs, 30s clips; at the most already, a press
-  says "Already the most."); ▶️ Start appears once 2 have joined and
-  starts the game (the press counts as their join); ✖️ Cancel calls it
-  off. There's no countdown: the game starts only with ▶️ Start (or
+  `✅ N` · `Songs: N` · `▶️` · `✖️`.
+  Press ✅ to join: it's anyone's, and shows how many have joined (a
+  pop-up says so, or that you're already in). The rest are the player who
+  started it's: `Songs` switches between what the game was opened with
+  (`SONGS_SONGS`, or what `/song` was typed with) and double that, up to
+  10 songs (at the most already, a press says "Already the most."); the
+  clip length stays what `/song` was typed with (5s by default). The starter
+  presses ▶️ when everyone's in: it appears once 2 have joined and starts
+  the game (the press counts as their join); ✖️ calls it off.
+  There's no countdown: the game starts only with ▶️ (or
   `/song start`), and the lobby is called off after 15 minutes if it
   hasn't. Anyone else pressing the starter's buttons gets a pop-up saying
   only the starter can. On Signal, type `/song start`, `/song stop` and

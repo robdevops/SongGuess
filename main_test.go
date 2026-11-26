@@ -2215,17 +2215,16 @@ func songPosts(ops []outboxOp) int {
 }
 
 // lobbyRow is the lobby's one row of buttons for the game id with n
-// joined, its songs and clip length, and ▶️ Start once 2 have joined.
-func lobbyRow(id string, n, songs int, clip string) [][]addon.Button {
+// joined and its songs, and ▶️ (Start) once 2 have joined.
+func lobbyRow(id string, n, songs int) [][]addon.Button {
 	row := []addon.Button{
-		{Label: fmt.Sprintf("✋ Ready: %d", n), Data: "ready:" + id},
+		{Label: fmt.Sprintf("✅ %d", n), Data: "ready:" + id},
 		{Label: fmt.Sprintf("Songs: %d", songs), Data: "t1:" + id},
-		{Label: "Clip: " + clip, Data: "t2:" + id},
 	}
 	if n >= 2 {
-		row = append(row, addon.Button{Label: "▶️ Start", Data: "start:" + id})
+		row = append(row, addon.Button{Label: "▶️", Data: "start:" + id})
 	}
-	return [][]addon.Button{append(row, addon.Button{Label: "✖️ Cancel", Data: "cancel:" + id})}
+	return [][]addon.Button{append(row, addon.Button{Label: "✖️", Data: "cancel:" + id})}
 }
 
 // buttonsOps are the buttons ops in the outbox after cursor, checked to be
@@ -2246,25 +2245,25 @@ func (c *client) buttonsOps(cursor, id string) ([][][]addon.Button, string) {
 	return rows, page.Cursor
 }
 
-// The lobby's buttons are one row: ✋ Ready with none joined, the
-// toggles and ✖️ Cancel, no ▶️ Start; only in a group and only where the
+// The lobby's buttons are one row: ✅ with none joined, the songs
+// toggle and ✖️, no ▶️; only in a group and only where the
 // bot shows buttons. Its intro never says to react.
 func TestLobbyButtons(t *testing.T) {
 	clk, c, _, _, r := buttonLobby(t, false)
 	id := r.Meta.Watch.ID
-	if want := lobbyRow(id, 0, 2, "5s"); !reflect.DeepEqual(r.Meta.Buttons, want) || r.Meta.OnPress != "song_press" {
+	if want := lobbyRow(id, 0, 2); !reflect.DeepEqual(r.Meta.Buttons, want) || r.Meta.OnPress != "song_press" {
 		t.Fatalf("buttons %+v, onPress %q", r.Meta.Buttons, r.Meta.OnPress)
 	}
-	if len(r.Meta.Buttons) != 1 || len(r.Meta.Buttons[0]) > 5 {
+	if len(r.Meta.Buttons) != 1 || len(r.Meta.Buttons[0]) != 3 {
 		t.Errorf("rows %+v", r.Meta.Buttons)
 	}
 	w := words(r)
-	for _, want := range []string{"Press ✋ Ready to join", "presses ▶️ Start once everyone's in", "change the number of songs and the clip length with the buttons", "✖️ Cancel (/song stop)"} {
+	for _, want := range []string{"Press ✅ to join", "the starter presses ▶️ when everyone's in", "change the number of songs with Songs", "✖️ calls it off"} {
 		if !strings.Contains(w, want) {
 			t.Errorf("intro without %q: %q", want, w)
 		}
 	}
-	for _, not := range []string{"React", "react", "+30s", "/song wait", "30 seconds after"} {
+	for _, not := range []string{"React", "react", "+30s", "/song wait", "30 seconds after", "✋", "Start", "Cancel", "Ready", "clip length"} {
 		if strings.Contains(w, not) {
 			t.Errorf("intro with %q: %q", not, w)
 		}
@@ -2303,8 +2302,8 @@ func (c *client) joined() []string {
 	return slices.Clone(c.s.games[chat].Joined)
 }
 
-// ✋ Ready: anyone's, the starter's too; each join, by a press or a
-// reaction, and each leave, replaces the row with the new count, ▶️ Start
+// ✅ (Ready): anyone's, the starter's too; each join, by a press or a
+// reaction, and each leave, replaces the row with the new count, ▶️
 // in it from 2; no countdown starts the game; under an older lobby, after
 // the start and after the end, a press answers as the other buttons do.
 func TestPressReady(t *testing.T) {
@@ -2314,7 +2313,7 @@ func TestPressReady(t *testing.T) {
 		t.Errorf("bob's press: %q", got)
 	}
 	rows, cur := c.buttonsOps("0", id)
-	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2, "5s")) {
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2)) {
 		t.Fatalf("after bob: %+v", rows)
 	}
 	if got := c.press("ready:"+id, from(clk, chat, bob)); got != alreadyIn {
@@ -2335,7 +2334,7 @@ func TestPressReady(t *testing.T) {
 		t.Errorf("alice's press: %q", got)
 	}
 	rows, cur = c.buttonsOps(cur, id)
-	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 2, 2, "5s")) || len(rows[0]) != 1 {
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 2, 2)) || len(rows[0]) != 1 {
 		t.Fatalf("after alice: %+v", rows)
 	}
 	c.s.mu.Lock()
@@ -2348,14 +2347,14 @@ func TestPressReady(t *testing.T) {
 	if p := c.outbox(cur); songPosts(p.Ops) != 0 || len(p.Ops) != 0 {
 		t.Fatalf("started by itself: %+v", p)
 	}
-	c.react(true, from(clk, chat, bob)) // bob leaves: no ▶️ Start
+	c.react(true, from(clk, chat, bob)) // bob leaves: no ▶️
 	rows, cur = c.buttonsOps(cur, id)
-	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2, "5s")) {
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2)) {
 		t.Fatalf("after bob left: %+v", rows)
 	}
 	c.react(false, from(clk, chat, bob))
 	rows, cur = c.buttonsOps(cur, id)
-	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 2, 2, "5s")) {
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 2, 2)) {
 		t.Fatalf("after bob's reaction: %+v", rows)
 	}
 	if got := c.press("start:"+id, from(clk, chat, alice)); got != startingNow {
@@ -2384,7 +2383,7 @@ func TestPressReady(t *testing.T) {
 
 // A lobby with buttons is called off lobbyMax after it opened, whoever
 // joined: with too few, as without buttons; with enough, as nobody
-// pressed ▶️ Start.
+// pressed ▶️.
 func TestButtonLobbyCallOff(t *testing.T) {
 	for _, tc := range []struct {
 		joined []string
@@ -2443,16 +2442,19 @@ func clipLen(t *testing.T, data string) time.Duration {
 	return total
 }
 
-// The toggles: the starter's only; each flips between what the lobby
+// The songs toggle: the starter's only; it flips between what the lobby
 // opened with and double it, replacing the row and saving; songs chosen
-// for fewer, or for another clip length, are chosen again; the game that
-// starts plays what they show.
+// for fewer are chosen again; the game that starts plays what it shows,
+// with the clip length /song gave. An older lobby's clip toggle is gone.
 func TestPressToggles(t *testing.T) {
 	clk, c, _, _, r := buttonLobby(t, false)
 	id := r.Meta.Watch.ID
-	for _, data := range []string{"t1:", "t2:"} {
-		if got := c.press(data+id, from(clk, chat, bob)); got != notStarter {
-			t.Errorf("bob's %s: %q", data, got)
+	if got := c.press("t1:"+id, from(clk, chat, bob)); got != notStarter {
+		t.Errorf("bob's t1: %q", got)
+	}
+	for _, who := range []string{alice, bob} {
+		if got := c.press("t2:"+id, from(clk, chat, who)); got != buttonGone {
+			t.Errorf("%s's t2: %q", who, got)
 		}
 	}
 	if rows, _ := c.buttonsOps("0", id); len(rows) != 0 {
@@ -2477,22 +2479,18 @@ func TestPressToggles(t *testing.T) {
 	if g := c.game(); g.Count != 4 || g.Preparing {
 		t.Errorf("4 again: %+v", g)
 	}
-	if got := c.press("t2:"+id, from(clk, chat, alice)); got != "Clip: 10s" {
-		t.Errorf("t2: %q", got)
-	}
-	c.ready()
-	if g := c.game(); g.Clip != 10*time.Second || g.GatheredClip != 10*time.Second || g.Preparing {
-		t.Errorf("10s: %+v", g)
+	if g := c.game(); g.Clip != 5*time.Second || g.Asked != 4 {
+		t.Errorf("after t2: %+v", g)
 	}
 	rows, cur := c.buttonsOps("0", id)
-	want := [][][]addon.Button{lobbyRow(id, 0, 4, "5s"), lobbyRow(id, 0, 2, "5s"), lobbyRow(id, 0, 4, "5s"), lobbyRow(id, 0, 4, "10s")}
+	want := [][][]addon.Button{lobbyRow(id, 0, 4), lobbyRow(id, 0, 2), lobbyRow(id, 0, 4)}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("rows %+v", rows)
 	}
 	c.s.mu.Lock()
 	data, _ := json.Marshal(c.s.games[chat])
 	c.s.mu.Unlock()
-	if !strings.Contains(string(data), `"asked":4`) || !strings.Contains(string(data), `"clip":10000000000`) {
+	if !strings.Contains(string(data), `"asked":4`) || !strings.Contains(string(data), `"clip":5000000000`) {
 		t.Errorf("not saved: %s", data)
 	}
 	c.press("ready:"+id, from(clk, chat, bob))
@@ -2509,21 +2507,23 @@ func TestPressToggles(t *testing.T) {
 	if song == nil || song.Text != songText(&game{Count: 4}) {
 		t.Fatalf("ops %+v", page)
 	}
-	if d := clipLen(t, song.Audio.Data); d < 10*time.Second || d > 10*time.Second+30*time.Millisecond {
+	if d := clipLen(t, song.Audio.Data); d < 5*time.Second || d > 5*time.Second+30*time.Millisecond {
 		t.Errorf("a clip of %s", d)
 	}
 }
 
-// A toggle stops at the game's limit: double, or the limit if less; at the
-// limit already, it has one mode, and a press changes nothing.
+// The toggle stops at the game's limit: double, or the limit if less; at
+// the limit already, it has one mode, and a press changes nothing. The
+// clip length stays what /song gave, up to 30s.
 func TestPressTogglesCap(t *testing.T) {
 	for _, tc := range []struct {
 		args       string
-		t1, t2     string // the pop-ups
+		t1         string // the pop-up
 		songs, max int
+		clip       time.Duration
 	}{
-		{"8 20s", "Songs: 10", "Clip: 30s", 8, maxSongs},
-		{"10 30s", atMost, atMost, 10, 10},
+		{"8 20s", "Songs: 10", 8, maxSongs, 20 * time.Second},
+		{"10 30s", atMost, 10, 10, maxClip},
 	} {
 		clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
 		d := newFakeDeezer(t)
@@ -2535,12 +2535,12 @@ func TestPressTogglesCap(t *testing.T) {
 		if got := c.press("t1:"+id, from(clk, chat, alice)); got != tc.t1 {
 			t.Errorf("%s: t1 %q", tc.args, got)
 		}
-		if got := c.press("t2:"+id, from(clk, chat, alice)); got != tc.t2 {
+		if got := c.press("t2:"+id, from(clk, chat, alice)); got != buttonGone {
 			t.Errorf("%s: t2 %q", tc.args, got)
 		}
 		c.ready()
 		g := c.game()
-		if g.Asked != tc.max || g.Clip != maxClip {
+		if g.Asked != tc.max || g.Clip != tc.clip {
 			t.Errorf("%s: %d songs, %s clips", tc.args, g.Asked, g.Clip)
 		}
 		rows, _ := c.buttonsOps("0", id)
@@ -2575,7 +2575,7 @@ func TestPressTogglePreparing(t *testing.T) {
 	}
 }
 
-// ✋ Ready presses racing ▶️ Start start the game once, with every join
+// ✅ presses racing ▶️ start the game once, with every join
 // made before it among its players.
 func TestPressReadyRaces(t *testing.T) {
 	for range 20 {
@@ -2607,7 +2607,7 @@ func TestPressReadyRaces(t *testing.T) {
 	}
 }
 
-// ▶️ Start: the starter's only; their press is their join; with too few
+// ▶️ (Start): the starter's only; their press is their join; with too few
 // it waits; with enough the game starts at once; after it, and under an
 // older lobby, a press does nothing.
 func TestPressStart(t *testing.T) {
@@ -2623,7 +2623,7 @@ func TestPressStart(t *testing.T) {
 		t.Errorf("joined %v", got)
 	}
 	rows, cur := c.buttonsOps("0", id)
-	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2, "5s")) {
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2)) {
 		t.Fatalf("after alice's start: %+v", rows)
 	}
 	if got := c.press("start:sother", from(clk, chat, alice)); got != gameOver {
@@ -2645,7 +2645,7 @@ func TestPressStart(t *testing.T) {
 		t.Errorf("game %+v", g)
 	}
 	c.s.mu.Unlock()
-	for _, data := range []string{"start:", "cancel:", "wait:", "t1:", "t2:"} {
+	for _, data := range []string{"start:", "cancel:", "wait:", "t1:"} {
 		if got := c.press(data+id, from(clk, chat, alice)); got != alreadyBegun {
 			t.Errorf("%s after the start: %q", data, got)
 		}
@@ -2660,7 +2660,7 @@ func TestPressStart(t *testing.T) {
 	}
 }
 
-// Typed, /song start does what ▶️ Start does, in the buttons' words; /song
+// Typed, /song start does what ▶️ does, in the buttons' words; /song
 // wait says there's no countdown.
 func TestTypedButtonLobby(t *testing.T) {
 	clk, c, _, _, r := buttonLobby(t, false)
@@ -2676,7 +2676,7 @@ func TestTypedButtonLobby(t *testing.T) {
 	}
 	c.press("ready:"+id, from(clk, chat, bob))
 	rows, cur := c.buttonsOps("0", id)
-	if !reflect.DeepEqual(rows, [][][]addon.Button{lobbyRow(id, 1, 2, "5s"), lobbyRow(id, 2, 2, "5s")}) {
+	if !reflect.DeepEqual(rows, [][][]addon.Button{lobbyRow(id, 1, 2), lobbyRow(id, 2, 2)}) {
 		t.Errorf("rows %+v", rows)
 	}
 	if got := words(c.song("start", from(clk, chat, alice))); got != startingNow {
@@ -2687,7 +2687,7 @@ func TestTypedButtonLobby(t *testing.T) {
 	}
 }
 
-// ▶️ Start while the songs are still chosen starts the game as the timer
+// ▶️ while the songs are still chosen starts the game as the timer
 // would: a post says they are being made ready.
 func TestPressStartPreparing(t *testing.T) {
 	clk, c, d, _, r := buttonLobby(t, true)
@@ -2711,7 +2711,7 @@ func TestPressStartPreparing(t *testing.T) {
 	}
 }
 
-// ✖️ Cancel: the starter's only; it calls the lobby off as /song stop
+// ✖️ (Cancel): the starter's only; it calls the lobby off as /song stop
 // does, saying so in the chat.
 func TestPressCancel(t *testing.T) {
 	clk, c, _, _, r := buttonLobby(t, false)
@@ -2899,7 +2899,7 @@ func TestPressRacesTimer(t *testing.T) {
 }
 
 // /song in the lobby says the game is waiting for players, not on a song,
-// in the words of the network: press ✋ Ready, or react.
+// in the words of the network: press ✅, or react.
 func TestLobbyBusy(t *testing.T) {
 	clk, c, _, _, r := buttonLobby(t, false)
 	if got := words(c.song("", from(clk, chat, bob))); got != readyBusyText || strings.Contains(got, "react") {
