@@ -2228,21 +2228,38 @@ func lobbyRow(id string, n, songs int) [][]addon.Button {
 }
 
 // buttonsOps are the buttons ops in the outbox after cursor, checked to be
-// for the lobby id in chat, and the cursor after them.
+// for the lobby id in chat and to leave its text be, and the cursor after
+// them.
 func (c *client) buttonsOps(cursor, id string) ([][][]addon.Button, string) {
+	c.t.Helper()
+	rows, texts, next := c.buttonsOpsText(cursor, id)
+	for i, text := range texts {
+		if text != "" {
+			c.t.Errorf("buttons op %d with text %q", i, text)
+		}
+	}
+	return rows, next
+}
+
+// buttonsOpsText are the buttons ops in the outbox after cursor, checked
+// to be for the lobby id in chat: their rows, their texts, and the cursor
+// after them.
+func (c *client) buttonsOpsText(cursor, id string) ([][][]addon.Button, []string, string) {
 	c.t.Helper()
 	page := c.outbox(cursor)
 	var rows [][][]addon.Button
+	var texts []string
 	for _, op := range page.Ops {
 		if op.Op != "buttons" {
 			continue
 		}
-		if op.Chat != chat || op.Watch != id || op.Text != "" {
+		if op.Chat != chat || op.Watch != id {
 			c.t.Errorf("buttons op %+v", op)
 		}
 		rows = append(rows, op.Buttons)
+		texts = append(texts, op.Text)
 	}
-	return rows, page.Cursor
+	return rows, texts, page.Cursor
 }
 
 // The lobby's buttons are one row: ✅ with none joined, the songs
@@ -2482,10 +2499,22 @@ func TestPressToggles(t *testing.T) {
 	if g := c.game(); g.Clip != 5*time.Second || g.Asked != 4 {
 		t.Errorf("after t2: %+v", g)
 	}
-	rows, cur := c.buttonsOps("0", id)
+	rows, texts, cur := c.buttonsOpsText("0", id)
 	want := [][][]addon.Button{lobbyRow(id, 0, 4), lobbyRow(id, 0, 2), lobbyRow(id, 0, 4)}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("rows %+v", rows)
+	}
+	// Each toggle rewrites the intro for the songs it shows.
+	for i, n := range []int{4, 2, 4} {
+		if i >= len(texts) {
+			break
+		}
+		if want := fmt.Sprintf(" · %d songs, ", n); !strings.Contains(texts[i], want) || !strings.Contains(texts[i], "Press ✅ to join") {
+			t.Errorf("text %d without %q: %q", i, want, texts[i])
+		}
+	}
+	if !strings.Contains(words(r), " · 2 songs, ") {
+		t.Errorf("intro %q", words(r))
 	}
 	c.s.mu.Lock()
 	data, _ := json.Marshal(c.s.games[chat])
@@ -2543,7 +2572,7 @@ func TestPressTogglesCap(t *testing.T) {
 		if g.Asked != tc.max || g.Clip != tc.clip {
 			t.Errorf("%s: %d songs, %s clips", tc.args, g.Asked, g.Clip)
 		}
-		rows, _ := c.buttonsOps("0", id)
+		rows, _, _ := c.buttonsOpsText("0", id)
 		if tc.t1 == atMost && len(rows) != 0 {
 			t.Errorf("%s: ops %+v", tc.args, rows)
 		}

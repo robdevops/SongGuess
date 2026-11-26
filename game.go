@@ -377,11 +377,18 @@ func lobbyRows(g *game) [][]addon.Button {
 }
 
 // showLobby replaces the buttons under g's intro with its lobby's rows as
-// they are now, where its lobby has buttons. s.mu is held.
-func (s *server) showLobby(g *game) {
-	if g.Lobby && g.Buttons {
-		s.queue(addon.Op{Op: "buttons", Chat: g.Chat, Watch: g.ID, Buttons: lobbyRows(g)})
+// they are now, where its lobby has buttons; with retext, it rewrites the
+// intro too, as intro writes it now, for a change it tells of such as the
+// number of songs. s.mu is held.
+func (s *server) showLobby(g *game, retext bool) {
+	if !g.Lobby || !g.Buttons {
+		return
 	}
+	op := addon.Op{Op: "buttons", Chat: g.Chat, Watch: g.ID, Buttons: lobbyRows(g)}
+	if retext {
+		op.Text = clamp(intro(g), maxPost)
+	}
+	s.queue(op)
 }
 
 // doubled is the toggle's second mode: double its first, base, but at
@@ -404,7 +411,7 @@ func (s *server) toggleLocked(g *game) string {
 	}
 	text := fmt.Sprintf("Songs: %d", g.Asked)
 	s.rechooseLocked(g)
-	s.showLobby(g)
+	s.showLobby(g, true)
 	return text
 }
 
@@ -956,7 +963,7 @@ func (s *server) reacted(c *addon.Context, removed bool) addon.Result {
 		return addon.Text("Noted.")
 	}
 	s.armLobby(g)
-	s.showLobby(g)
+	s.showLobby(g, false)
 	s.mu.Unlock()
 	s.save()
 	return addon.Text("Noted.")
@@ -1079,7 +1086,7 @@ func (s *server) lobbyAction(c *addon.Context, action, id string) string {
 			return alreadyIn
 		}
 		s.armLobby(g)
-		s.showLobby(g)
+		s.showLobby(g, false)
 		text = fmt.Sprintf("You're in: %d joined.", len(g.Joined))
 	case "t1":
 		if !g.Buttons {
@@ -1096,7 +1103,7 @@ func (s *server) lobbyAction(c *addon.Context, action, id string) string {
 				text = needReady
 			}
 			if joined {
-				s.showLobby(g)
+				s.showLobby(g, false)
 			}
 			break
 		}

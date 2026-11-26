@@ -248,7 +248,10 @@ their cancellation, and the outbox the bot reads. The game adds:
   still being chosen, chooses them again in the background. Every change
   of the players or a toggle queues
   `{"op": "buttons", "chat": <chat>, "watch": <id>, "buttons": [[…]]}`
-  with the new row (signalbot `f6a3c5c` or newer; elsewhere a no-op). The
+  with the new row (signalbot `f6a3c5c` or newer; elsewhere a no-op); a
+  toggle's op also carries `"text"`, the intro rewritten for the new
+  number of songs, which replaces the lobby message's text (signalbot
+  `2173af6` or newer). The
   watch runs long enough for double the songs, chosen again at the
   lobby's last moment.
 - 5 seconds before a song's deadline, the game queues
