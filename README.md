@@ -30,13 +30,15 @@ scoreboard.
   join; if that takes longer, the bot says it's getting them ready.
 - **Lobby buttons.** Where the bot's network shows buttons (Telegram,
   Discord, Slack), the lobby message has one row:
-  `✅ N` · `Songs: N` · `▶️` · `✖️`.
+  `✅ N` · `Songs: N` · `Interval: Ns` · `▶️` · `✖️`.
   Press ✅ to join: it's anyone's, and shows how many have joined (a
   pop-up says so, or that you're already in). The rest are the player who
   started it's: `Songs` switches between what the game was opened with
   (`SONGS_SONGS`, or what `/song` was typed with) and double that, up to
-  10 songs (at the most already, a press says "Already the most."); the
-  clip length stays what `/song` was typed with (5s by default). The starter
+  10 songs (at the most already, a press says "Already the most.");
+  `Interval` likewise switches the time to answer each song, in seconds,
+  between `SONGS_TIME` (35s by default) and double that, up to 2 minutes
+  (120s); the clip length stays what `/song` was typed with (5s by default). The starter
   presses ▶️ when everyone's in: it appears once 2 have joined and starts
   the game (the press counts as their join); ✖️ calls it off.
   There's no countdown: the game starts only with ▶️ (or

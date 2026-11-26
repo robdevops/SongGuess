@@ -283,7 +283,7 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 	now := s.clock.Now()
 	count := min(n, 1+len(pool))
 	g := s.newGame(c, src, n, length, now)
-	g.Count, g.End = count, now.Add(s.playTime(count))
+	g.Count, g.End = count, now.Add(s.playTime(count, g.Time))
 	g.Songs, g.Pool = []track{t}, pool
 	s.games[c.Chat] = g
 	s.media[g.ID] = map[int]media{0: m}
@@ -310,12 +310,13 @@ func (s *server) openLobby(c *addon.Context, src source, n int, length time.Dura
 	now := s.clock.Now()
 	g := s.newGame(c, src, n, length, now)
 	// Preparing overlaps the lobby: only what it may take past it counts.
-	g.End = now.Add(max(lobbyMax, prepMax) + s.playTime(n))
+	g.End = now.Add(max(lobbyMax, prepMax) + s.playTime(n, g.Time))
 	if s.srv.Buttons() {
 		// The starter may double the songs, and have them chosen again,
-		// until the lobby's last moment: the watch covers that too.
-		g.Buttons, g.BaseSongs = true, n
-		g.End = now.Add(lobbyMax + prepMax + s.playTime(doubled(n, maxSongs)))
+		// until the lobby's last moment, and double the time to answer
+		// each: the watch covers that too.
+		g.Buttons, g.BaseSongs, g.BaseTime = true, n, g.Time
+		g.End = now.Add(lobbyMax + prepMax + s.playTime(doubled(n, maxSongs), doubledTime(g.Time)))
 	}
 	g.Lobby, g.CallOff, g.Preparing = true, now.Add(lobbyMax), true
 	s.games[c.Chat] = g
@@ -340,10 +341,10 @@ func (s *server) newGame(c *addon.Context, src source, n int, length time.Durati
 	}
 }
 
-// playTime is how long count songs take to play: each one's time and
-// settle, the gaps between them, and fetchSlack.
-func (s *server) playTime(count int) time.Duration {
-	return time.Duration(count)*(s.cfg.Time+settle) + time.Duration(count-1)*s.gap + fetchSlack
+// playTime is how long count songs take to play: each one's time to
+// answer, each, and settle, the gaps between them, and fetchSlack.
+func (s *server) playTime(count int, each time.Duration) time.Duration {
+	return time.Duration(count)*(each+settle) + time.Duration(count-1)*s.gap + fetchSlack
 }
 
 // introResult is the answer to /song that begins g: text, its intro, and
@@ -362,12 +363,16 @@ func (s *server) introResult(g *game, text string) addon.Result {
 
 // lobbyRows are the buttons of g's lobby, in one row: ✅ (Ready), for
 // anyone to join, with the players joined so far; then the starter's
-// toggle of the number of songs, ▶️ (Start) once enough have joined, and
+// toggles of the number of songs and of the time to answer each (not in a
+// lobby opened before it had one), ▶️ (Start) once enough have joined, and
 // ✖️ (Cancel).
 func lobbyRows(g *game) [][]addon.Button {
 	row := []addon.Button{
 		{Label: fmt.Sprintf("✅ %d", len(g.Joined)), Data: "ready:" + g.ID},
 		{Label: fmt.Sprintf("Songs: %d", g.Asked), Data: "t1:" + g.ID},
+	}
+	if g.BaseTime > 0 {
+		row = append(row, addon.Button{Label: intervalLabel(g.Time), Data: "i:" + g.ID})
 	}
 	if len(g.Joined) >= minPlayers {
 		row = append(row, addon.Button{Label: "▶️", Data: "start:" + g.ID})
@@ -387,6 +392,34 @@ func (s *server) showLobby(g *game) {
 // doubled is the toggle's second mode: double its first, base, but at
 // most most; equal to base if base is already the most.
 func doubled(base, most int) int { return max(min(2*base, most), base) }
+
+// doubledTime is the interval toggle's second mode: double base, but at
+// most maxTime, the longest time to answer a song; base if base is already
+// that or more.
+func doubledTime(base time.Duration) time.Duration { return max(min(2*base, maxTime), base) }
+
+// intervalLabel is the interval toggle's label, and its pop-up: the time
+// to answer each song in whole seconds, such as "Interval: 70s".
+func intervalLabel(d time.Duration) string {
+	return fmt.Sprintf("Interval: %ds", int(d.Round(time.Second)/time.Second))
+}
+
+// intervalLocked flips g's time to answer each song between what its
+// lobby opened with and double that, at most maxTime; it answers with the
+// press's pop-up. Its caller saves. s.mu is held.
+func (s *server) intervalLocked(g *game) string {
+	alt := doubledTime(g.BaseTime)
+	if alt == g.BaseTime {
+		return atMost
+	}
+	if g.Time == g.BaseTime {
+		g.Time = alt
+	} else {
+		g.Time = g.BaseTime
+	}
+	s.showLobby(g)
+	return intervalLabel(g.Time)
+}
 
 // toggleLocked flips g's number of songs between what its lobby opened
 // with and double that, at most the game's limit, and has its songs chosen
@@ -506,7 +539,7 @@ func intro(g *game) string {
 	join, early := "", "From song 2 on, a song ends as soon as everyone who answered song 1 has answered."
 	if g.Lobby {
 		if g.Buttons { // reactions still count, unmentioned; no countdown
-			join = "👋 **Press ✅ to join**, whoever started it too; the starter presses ▶️ when everyone's in (at least 2 players) and can change the number of songs with Songs (✖️ calls it off, as /song stop does).\n"
+			join = "👋 **Press ✅ to join**, whoever started it too; the starter presses ▶️ when everyone's in (at least 2 players) and can change the number of songs with Songs and the time to answer each with Interval (✖️ calls it off, as /song stop does).\n"
 		} else {
 			join = "👋 **React to this message with any emoji to join**, whoever started it too: the game starts 30 seconds after the last player joins, once at least 2 have.\n" +
 				"Whoever started it can begin now with /song start, wait 30s longer with /song wait, or call it off with /song stop.\n"
@@ -1045,9 +1078,9 @@ func (s *server) beginLocked(g *game, now time.Time) {
 }
 
 // lobbyAction is anyone's ✅ (ready), or the starter's songs toggle (t1),
-// ▶️ (start) or ✖️ (cancel), pressed under the lobby of the game id, or an
-// older lobby's ⏱ +30s (wait); or, with id "", /song start or /song wait
-// typed in its chat. It answers with the press's pop-up, or the
+// interval toggle (i), ▶️ (start) or ✖️ (cancel), pressed under the lobby
+// of the game id, or an older lobby's ⏱ +30s (wait); or, with id "",
+// /song start or /song wait typed in its chat. It answers with the press's pop-up, or the
 // command's reply. It does its work in memory, posting through the outbox,
 // so a press answers well within the bot's 5 seconds.
 func (s *server) lobbyAction(c *addon.Context, action, id string) string {
@@ -1087,6 +1120,16 @@ func (s *server) lobbyAction(c *addon.Context, action, id string) string {
 			return ""
 		}
 		text = s.toggleLocked(g)
+	case "i":
+		if !g.Buttons {
+			s.mu.Unlock()
+			return ""
+		}
+		if g.BaseTime <= 0 { // a lobby opened before it had the toggle
+			s.mu.Unlock()
+			return buttonGone
+		}
+		text = s.intervalLocked(g)
 	case "start": // the starter's press is their join
 		joined := s.joinLocked(g, c.Sender, now)
 		if len(g.Joined) < minPlayers {

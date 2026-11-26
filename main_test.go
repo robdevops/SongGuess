@@ -2215,11 +2215,18 @@ func songPosts(ops []outboxOp) int {
 }
 
 // lobbyRow is the lobby's one row of buttons for the game id with n
-// joined and its songs, and ▶️ (Start) once 2 have joined.
+// joined and its songs, the tests' 30s to answer each, and ▶️ (Start)
+// once 2 have joined.
 func lobbyRow(id string, n, songs int) [][]addon.Button {
+	return lobbyRowAt(id, n, songs, 30)
+}
+
+// lobbyRowAt is lobbyRow with secs seconds to answer each song.
+func lobbyRowAt(id string, n, songs, secs int) [][]addon.Button {
 	row := []addon.Button{
 		{Label: fmt.Sprintf("✅ %d", n), Data: "ready:" + id},
 		{Label: fmt.Sprintf("Songs: %d", songs), Data: "t1:" + id},
+		{Label: fmt.Sprintf("Interval: %ds", secs), Data: "i:" + id},
 	}
 	if n >= 2 {
 		row = append(row, addon.Button{Label: "▶️", Data: "start:" + id})
@@ -2245,8 +2252,8 @@ func (c *client) buttonsOps(cursor, id string) ([][][]addon.Button, string) {
 	return rows, page.Cursor
 }
 
-// The lobby's buttons are one row: ✅ with none joined, the songs
-// toggle and ✖️, no ▶️; only in a group and only where the
+// The lobby's buttons are one row: ✅ with none joined, the songs and
+// interval toggles and ✖️, no ▶️; only in a group and only where the
 // bot shows buttons. Its intro never says to react.
 func TestLobbyButtons(t *testing.T) {
 	clk, c, _, _, r := buttonLobby(t, false)
@@ -2254,11 +2261,11 @@ func TestLobbyButtons(t *testing.T) {
 	if want := lobbyRow(id, 0, 2); !reflect.DeepEqual(r.Meta.Buttons, want) || r.Meta.OnPress != "song_press" {
 		t.Fatalf("buttons %+v, onPress %q", r.Meta.Buttons, r.Meta.OnPress)
 	}
-	if len(r.Meta.Buttons) != 1 || len(r.Meta.Buttons[0]) != 3 {
+	if len(r.Meta.Buttons) != 1 || len(r.Meta.Buttons[0]) != 4 {
 		t.Errorf("rows %+v", r.Meta.Buttons)
 	}
 	w := words(r)
-	for _, want := range []string{"Press ✅ to join", "the starter presses ▶️ when everyone's in", "change the number of songs with Songs", "✖️ calls it off"} {
+	for _, want := range []string{"Press ✅ to join", "the starter presses ▶️ when everyone's in", "change the number of songs with Songs", "the time to answer each with Interval", "✖️ calls it off"} {
 		if !strings.Contains(w, want) {
 			t.Errorf("intro without %q: %q", want, w)
 		}
@@ -2271,8 +2278,9 @@ func TestLobbyButtons(t *testing.T) {
 	if !r.Meta.Watch.Reactions {
 		t.Error("no reactions")
 	}
-	// The watch covers double the songs, chosen again at the lobby's end.
-	want := clk.Now().Add(lobbyMax + prepMax + 4*(30*time.Second+settle) + fetchSlack + watchSlack).Format(time.RFC3339)
+	// The watch covers double the songs, chosen again at the lobby's end,
+	// with double the time to answer each.
+	want := clk.Now().Add(lobbyMax + prepMax + 4*(60*time.Second+settle) + fetchSlack + watchSlack).Format(time.RFC3339)
 	if r.Meta.Watch.Until != want {
 		t.Errorf("until %s, want %s", r.Meta.Watch.Until, want)
 	}
@@ -2550,6 +2558,105 @@ func TestPressTogglesCap(t *testing.T) {
 		c.press("t1:"+id, from(clk, chat, alice))
 		if g := c.game(); g.Asked != tc.songs {
 			t.Errorf("%s: back to %d songs", tc.args, g.Asked)
+		}
+		c.ready()
+		c.close()
+	}
+}
+
+// The interval toggle: the starter's only; it flips the time to answer
+// each song between what the lobby opened with and double it, in whole
+// seconds, replacing the row and saving; the game that starts gives each
+// song that time, and its watch allows for it.
+func TestPressInterval(t *testing.T) {
+	clk, c, _, _, r := buttonLobby(t, false)
+	id := r.Meta.Watch.ID
+	opened := clk.Now()
+	if got := c.press("i:"+id, from(clk, chat, bob)); got != notStarter {
+		t.Errorf("bob's i: %q", got)
+	}
+	if rows, _ := c.buttonsOps("0", id); len(rows) != 0 {
+		t.Errorf("ops after bob's: %+v", rows)
+	}
+	for i, want := range []string{"Interval: 60s", "Interval: 30s", "Interval: 60s"} {
+		if got := c.press("i:"+id, from(clk, chat, alice)); got != want {
+			t.Errorf("press %d: %q, want %q", i, got, want)
+		}
+	}
+	g := c.game()
+	if g.Time != time.Minute || g.BaseTime != 30*time.Second || g.Asked != 2 {
+		t.Errorf("game %+v", g)
+	}
+	if most := lobbyMax + prepMax + c.s.playTime(doubled(2, maxSongs), time.Minute); g.End.Sub(opened) < most {
+		t.Errorf("the watch ends %s after the lobby opened, under %s", g.End.Sub(opened), most)
+	}
+	rows, cur := c.buttonsOps("0", id)
+	want := [][][]addon.Button{lobbyRowAt(id, 0, 2, 60), lobbyRowAt(id, 0, 2, 30), lobbyRowAt(id, 0, 2, 60)}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("rows %+v", rows)
+	}
+	c.s.mu.Lock()
+	data, _ := json.Marshal(c.s.games[chat])
+	c.s.mu.Unlock()
+	if !strings.Contains(string(data), `"time":60000000000`) {
+		t.Errorf("not saved: %s", data)
+	}
+	c.press("ready:"+id, from(clk, chat, bob))
+	if rows, _ := c.buttonsOps(cur, id); len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRowAt(id, 1, 2, 60)) {
+		t.Errorf("after bob joined: %+v", rows)
+	}
+	if got := c.press("start:"+id, from(clk, chat, alice)); got != startingNow {
+		t.Fatalf("start: %q", got)
+	}
+	if g := c.game(); g.Lobby || g.Deadline.Sub(g.Opened) != time.Minute {
+		t.Errorf("song 1 open %s to %s", g.Opened, g.Deadline)
+	}
+	if got := c.press("i:"+id, from(clk, chat, alice)); got != alreadyBegun {
+		t.Errorf("i after the start: %q", got)
+	}
+}
+
+// The interval toggle stops at the longest time to answer, 2m: double, or
+// 2m if less; at 2m already, a press says so and changes nothing. A lobby
+// opened before the toggle has none.
+func TestPressIntervalCap(t *testing.T) {
+	for _, tc := range []struct {
+		time, pop string
+		max       time.Duration
+	}{
+		{"70s", "Interval: 120s", maxTime},
+		{"2m", atMost, maxTime},
+		{"90500ms", "Interval: 120s", maxTime},
+	} {
+		clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+		d := newFakeDeezer(t)
+		c := connect(t, testServer(t, t.TempDir(), clk, &syncBuffer{}, d.srv.URL, "SONGS_TIME", tc.time))
+		c.initializeButtons()
+		r := c.song("2", from(clk, chat, alice))
+		c.ready()
+		id := r.Meta.Watch.ID
+		if got := c.press("i:"+id, from(clk, chat, alice)); got != tc.pop {
+			t.Errorf("%s: i %q", tc.time, got)
+		}
+		rows, _ := c.buttonsOps("0", id)
+		if g := c.game(); g.Time != tc.max {
+			t.Errorf("%s: %s to answer", tc.time, g.Time)
+		}
+		if tc.pop == atMost && len(rows) != 0 {
+			t.Errorf("%s: ops %+v", tc.time, rows)
+		}
+		if tc.pop != atMost && (len(rows) != 1 || rows[0][0][2].Label != tc.pop) {
+			t.Errorf("%s: rows %+v", tc.time, rows)
+		}
+		c.press("i:"+id, from(clk, chat, alice))
+		if g := c.game(); g.Time != g.BaseTime {
+			t.Errorf("%s: back to %s, not %s", tc.time, g.Time, g.BaseTime)
+		}
+		c.s.mu.Lock()
+		c.s.games[chat].BaseTime = 0 // as a lobby opened before the toggle
+		c.s.mu.Unlock()
+		if got := c.press("i:"+id, from(clk, chat, alice)); got != buttonGone {
+			t.Errorf("%s: an older lobby's i %q", tc.time, got)
 		}
 		c.ready()
 		c.close()
