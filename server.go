@@ -181,7 +181,7 @@ func newServer(cfg config, clk clock, rnd *mrand.Rand, client *http.Client, logg
 		played:    map[string][]stamp{},
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.srv = addon.New(addon.Config{Name: "songs", Title: "Songs", Version: "1", Tools: s.tools(), Now: clk.Now, Changed: s.save})
+	s.srv = addon.New(addon.Config{Name: "songs", Title: "Songs", Tools: s.tools(), Now: clk.Now, Changed: s.save})
 	var st saved
 	if _, err := s.doc.Load(&st); err != nil {
 		return nil, err
