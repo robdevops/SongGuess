@@ -21,18 +21,22 @@ scoreboard.
 
 ## How to play
 
-- **Join.** In a group, react to the lobby message with any emoji. The
-  player who starts it must react too. The game starts 30 seconds after
-  the last player joins, once there are at least 2. It is called off if
-  fewer than 2 have joined after 15 minutes. The songs are chosen while
-  players join; if that takes longer, the bot says it's getting them ready.
+- **Join.** In a group, press ✋ Ready under the lobby message on
+  Telegram, Discord and Slack, or react to it with any emoji (on Signal,
+  the only way). Each player joins for themselves; the player who starts
+  it must join too. The game starts 30 seconds after the last player
+  joins, once there are at least 2. It is called off if fewer than 2 have
+  joined after 15 minutes. The songs are chosen while players join; if
+  that takes longer, the bot says it's getting them ready.
 - **Lobby buttons.** Where the bot's network shows buttons (Telegram,
-  Discord, Slack), the lobby message has three for the player who started
-  it: ▶️ Start (start now, once 2 have joined; the press counts as their
-  join), ✖️ Cancel (call it off) and ⏱ +30s (wait 30 seconds longer each
-  press, up to the 15-minute call-off). Anyone else pressing gets a pop-up
-  saying only the starter can. On Signal, type `/song start`, `/song stop`
-  and `/song wait` instead.
+  Discord, Slack), the lobby message has ✋ Ready, for anyone (a pop-up
+  says how many have joined, or that you're already in), and under it
+  three for the player who started it: ▶️ Start (start now, once 2 have
+  joined; the press counts as their join), ✖️ Cancel (call it off) and
+  ⏱ +30s (wait 30 seconds longer each press, up to the 15-minute
+  call-off). Anyone else pressing those gets a pop-up saying only the
+  starter can. On Signal, type `/song start`, `/song stop` and
+  `/song wait` instead.
 - **DMs.** There is no lobby: the game starts at once. Any message is an
   answer.
 - **Answer.** In a group, reply to the song's message. Name the title, the

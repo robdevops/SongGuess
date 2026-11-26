@@ -44,6 +44,7 @@ const (
 	gameOver      = "That game is over."
 	startingNow   = "Starting!"
 	needPlayers   = "Waiting for at least 2 players: react to join."
+	alreadyIn     = "You're already in."
 	cancelled     = "Cancelled."
 	lobbyOff      = "The song quiz is off."
 	waitLonger    = "Starts 30s later."
@@ -329,18 +330,21 @@ func (s *server) playTime(count int) time.Duration {
 
 // introResult is the answer to /song that begins g: text, its intro, and
 // the watch that takes the replies, and in a lobby the reactions.
-// In a lobby, where the bot shows buttons, it has the starter's ▶️ Start,
-// ✖️ Cancel and ⏱ +30s under it.
+// In a lobby, where the bot shows buttons, it has ✋ Ready, for anyone to
+// join, above the starter's ▶️ Start, ✖️ Cancel and ⏱ +30s.
 func (s *server) introResult(g *game, text string) addon.Result {
 	meta := &addon.ResultMeta{Watch: &addon.Watch{
 		ID: g.ID, Replies: true, Reactions: g.Lobby, Until: g.End.Add(watchSlack).Format(time.RFC3339), Tool: "song_answer", Over: "That song quiz is over. Start another with /song.",
 	}}
 	if g.Lobby && s.srv.Buttons() {
-		meta.Buttons = [][]addon.Button{{
-			{Label: "▶️ Start", Data: "start:" + g.ID},
-			{Label: "✖️ Cancel", Data: "cancel:" + g.ID},
-			{Label: "⏱ +30s", Data: "wait:" + g.ID},
-		}}
+		meta.Buttons = [][]addon.Button{
+			{{Label: "✋ Ready", Data: "ready:" + g.ID}},
+			{
+				{Label: "▶️ Start", Data: "start:" + g.ID},
+				{Label: "✖️ Cancel", Data: "cancel:" + g.ID},
+				{Label: "⏱ +30s", Data: "wait:" + g.ID},
+			},
+		}
 		meta.OnPress = "song_press"
 	}
 	return addon.Result{Content: addon.Text(clamp(text, maxPost)).Content, Meta: meta}
@@ -423,7 +427,11 @@ func intro(g *game, buttons bool) string {
 	}
 	join, early := "", "From song 2 on, a song ends as soon as everyone who answered song 1 has answered."
 	if g.Lobby {
-		join = "👋 **React to this message with any emoji to join**, whoever started it too: the game starts 30 seconds after the last player joins, once at least 2 have.\n"
+		how := "React to this message with any emoji to join"
+		if buttons { // reactions still count, unmentioned
+			how = "Press ✋ Ready to join"
+		}
+		join = "👋 **" + how + "**, whoever started it too: the game starts 30 seconds after the last player joins, once at least 2 have.\n"
 		if buttons {
 			join += "Whoever started it can begin now with ▶️ Start (or /song start), wait 30s longer with ⏱ +30s (/song wait), or call it off with ✖️ Cancel (/song stop).\n"
 		} else {
@@ -844,8 +852,7 @@ func (s *server) reacted(c *addon.Context, removed bool) addon.Result {
 	in := slices.Contains(g.Joined, c.Sender)
 	switch {
 	case !removed && !in:
-		g.Joined = append(g.Joined, c.Sender)
-		g.LastJoin = s.clock.Now()
+		s.joinLocked(g, c.Sender, s.clock.Now())
 	case removed && in:
 		g.Joined = slices.DeleteFunc(g.Joined, func(u string) bool { return u == c.Sender })
 	default:
@@ -856,6 +863,19 @@ func (s *server) reacted(c *addon.Context, removed bool) addon.Result {
 	s.mu.Unlock()
 	s.save()
 	return addon.Text("Noted.")
+}
+
+// joinLocked has u join g's lobby at now, as a reaction, a press of ✋ Ready
+// or the starter's ▶️ Start does, and reports whether u is new to it. Its
+// caller re-arms the lobby's timer, or starts the game, and saves. s.mu is
+// held.
+func (s *server) joinLocked(g *game, u string, now time.Time) bool {
+	if slices.Contains(g.Joined, u) {
+		return false
+	}
+	g.Joined = append(g.Joined, u)
+	g.LastJoin = now
+	return true
 }
 
 // armLobby sets g's lobby timer: with enough players, to start lobbyWait
@@ -923,8 +943,8 @@ func (s *server) beginLocked(g *game, now time.Time) {
 	s.tryPost(g)
 }
 
-// lobbyAction is the starter's ▶️ Start, ✖️ Cancel or ⏱ +30s pressed
-// under the lobby of the game id, or, with id "", /song start or /song
+// lobbyAction is anyone's ✋ Ready, or the starter's ▶️ Start, ✖️ Cancel
+// or ⏱ +30s, pressed under the lobby of the game id, or, with id "", /song start or /song
 // wait typed in its chat. It answers with the press's pop-up, or the
 // command's reply. It does its work in memory, posting through the outbox,
 // so a press answers well within the bot's 5 seconds.
@@ -944,18 +964,22 @@ func (s *server) lobbyAction(c *addon.Context, action, id string) string {
 	case !g.Lobby:
 		s.mu.Unlock()
 		return alreadyBegun
-	case c.Sender != g.Starter:
+	case c.Sender != g.Starter && action != "ready":
 		s.mu.Unlock()
 		return notStarter
 	}
 	now := s.clock.Now()
 	var text string
 	switch action {
-	case "start": // the starter's press is their join
-		if !slices.Contains(g.Joined, c.Sender) {
-			g.Joined = append(g.Joined, c.Sender)
-			g.LastJoin = now
+	case "ready": // anyone's join, as a reaction is
+		if !s.joinLocked(g, c.Sender, now) {
+			s.mu.Unlock()
+			return alreadyIn
 		}
+		s.armLobby(g)
+		text = fmt.Sprintf("You're in: %d joined.", len(g.Joined))
+	case "start": // the starter's press is their join
+		s.joinLocked(g, c.Sender, now)
 		if len(g.Joined) < minPlayers {
 			s.armLobby(g)
 			text = needPlayers

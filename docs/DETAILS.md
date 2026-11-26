@@ -28,7 +28,9 @@ music, and holds no API key: Deezer's public API needs none.
   picks the English ones from the chart; without the `model` permission,
   only songs titled in another script (such as Korean or Japanese) are
   left out.
-- **Joining.** Take the reaction back to leave the lobby. Those who
+- **Joining.** A press of ✋ Ready and a reaction are the same join, each
+  player's own, saved alike. Taking a reaction back leaves the lobby,
+  however you joined. Those who
   joined are the players every song waits for; anyone may still answer.
   On Telegram the bot sees reactions only as the group's admin.
 - **Answering.** In a group, a reply to any of the game's messages counts

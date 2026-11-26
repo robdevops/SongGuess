@@ -2157,12 +2157,15 @@ func songPosts(ops []outboxOp) int {
 func TestLobbyButtons(t *testing.T) {
 	clk, c, _, _, r := buttonLobby(t, false)
 	id := r.Meta.Watch.ID
-	want := [][]addon.Button{{{Label: "▶️ Start", Data: "start:" + id}, {Label: "✖️ Cancel", Data: "cancel:" + id}, {Label: "⏱ +30s", Data: "wait:" + id}}}
+	want := [][]addon.Button{
+		{{Label: "✋ Ready", Data: "ready:" + id}},
+		{{Label: "▶️ Start", Data: "start:" + id}, {Label: "✖️ Cancel", Data: "cancel:" + id}, {Label: "⏱ +30s", Data: "wait:" + id}},
+	}
 	if !reflect.DeepEqual(r.Meta.Buttons, want) || r.Meta.OnPress != "song_press" {
 		t.Fatalf("buttons %+v, onPress %q", r.Meta.Buttons, r.Meta.OnPress)
 	}
-	if !strings.Contains(words(r), "▶️ Start (or /song start)") {
-		t.Errorf("intro %q", words(r))
+	if w := words(r); !strings.Contains(w, "▶️ Start (or /song start)") || !strings.Contains(w, "Press ✋ Ready to join") || strings.Contains(w, "React to this message") || !r.Meta.Watch.Reactions {
+		t.Errorf("intro %q", w)
 	}
 	dm := from(clk, "c_dm", alice)
 	dm.Group = false
@@ -2176,8 +2179,104 @@ func TestLobbyButtons(t *testing.T) {
 	c2.initializeWith(true, true)
 	r2 := c2.song("2", from(clk2, chat, alice))
 	c2.ready()
-	if r2.Meta == nil || r2.Meta.Buttons != nil || r2.Meta.OnPress != "" || !strings.Contains(words(r2), "begin now with /song start") {
+	if r2.Meta == nil || r2.Meta.Buttons != nil || r2.Meta.OnPress != "" || !strings.Contains(words(r2), "begin now with /song start") ||
+		!strings.Contains(words(r2), "React to this message with any emoji to join") || strings.Contains(words(r2), "Ready") {
 		t.Errorf("buttons without the capability: %+v %q", r2.Meta, words(r2))
+	}
+}
+
+// joined is who has joined the lobby in chat.
+func (c *client) joined() []string {
+	c.t.Helper()
+	c.s.mu.Lock()
+	defer c.s.mu.Unlock()
+	return slices.Clone(c.s.games[chat].Joined)
+}
+
+// ✋ Ready: anyone's, the starter's too; each press is a join of its own,
+// as a reaction is, saved; twice is already in; 30s after the last, with
+// 2, the game starts with them; after it, and under an older lobby, a
+// press answers as the other buttons do.
+func TestPressReady(t *testing.T) {
+	clk, c, _, _, r := buttonLobby(t, false)
+	id := r.Meta.Watch.ID
+	if got := c.press("ready:"+id, from(clk, chat, bob)); got != "You're in: 1 joined." {
+		t.Errorf("bob's press: %q", got)
+	}
+	if got := c.press("ready:"+id, from(clk, chat, bob)); got != alreadyIn {
+		t.Errorf("bob again: %q", got)
+	}
+	c.react(false, from(clk, chat, bob)) // a reaction after it is no second join
+	if got := c.joined(); !slices.Equal(got, []string{bob}) {
+		t.Errorf("joined %v", got)
+	}
+	if got := c.press("ready:sother", from(clk, chat, alice)); got != gameOver {
+		t.Errorf("an older lobby's press: %q", got)
+	}
+	clk.Advance(10 * time.Second)
+	if got := c.press("ready:"+id, from(clk, chat, alice)); got != "You're in: 2 joined." {
+		t.Errorf("alice's press: %q", got)
+	}
+	c.s.mu.Lock()
+	data, _ := json.Marshal(c.s.games[chat])
+	c.s.mu.Unlock()
+	if !strings.Contains(string(data), `"joined":["`+bob+`","`+alice+`"]`) {
+		t.Errorf("not saved: %s", data)
+	}
+	clk.Advance(lobbyWait - time.Second) // 30s after alice's, not bob's
+	if p := c.outbox("0"); len(p.Ops) != 0 {
+		t.Fatalf("started early: %+v", p)
+	}
+	clk.Advance(time.Second)
+	page := c.outbox("0")
+	if len(page.Ops) != 1 {
+		t.Fatalf("ops %+v", page)
+	}
+	checkSong(t, page.Ops[0], 1, 2)
+	c.s.mu.Lock()
+	if g := c.s.games[chat]; g.Lobby || !slices.Equal(g.Players, []string{bob, alice}) {
+		t.Errorf("game %+v", g)
+	}
+	c.s.mu.Unlock()
+	if got := c.press("ready:"+id, from(clk, chat, "u_carol")); got != alreadyBegun {
+		t.Errorf("after the start: %q", got)
+	}
+	c.song("end", from(clk, chat, alice))
+	if got := c.press("ready:"+id, from(clk, chat, "u_carol")); got != gameOver {
+		t.Errorf("after the end: %q", got)
+	}
+}
+
+// ✋ Ready presses racing the lobby's timer and ▶️ Start start the game
+// once, with every join made before it among its players.
+func TestPressReadyRaces(t *testing.T) {
+	for range 20 {
+		clk, c, _, logs, r := buttonLobby(t, false)
+		id := r.Meta.Watch.ID
+		c.press("ready:"+id, from(clk, chat, alice))
+		c.press("ready:"+id, from(clk, chat, bob))
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); clk.Advance(lobbyWait) }()
+		go func() { defer wg.Done(); c.press("start:"+id, from(clk, chat, alice)) }()
+		got := c.press("ready:"+id, from(clk, chat, "u_carol"))
+		wg.Wait()
+		if got != "You're in: 3 joined." && got != alreadyBegun {
+			t.Errorf("press %q", got)
+		}
+		if p := c.outbox("0"); songPosts(p.Ops) != 1 {
+			t.Fatalf("song posts %+v", p)
+		}
+		if n := strings.Count(logs.String(), "began:"); n != 1 {
+			t.Fatalf("began %d times", n)
+		}
+		c.s.mu.Lock()
+		g := c.s.games[chat]
+		if want := len(g.Joined); g.Lobby || len(g.Players) != want || (got == alreadyBegun) == slices.Contains(g.Players, "u_carol") {
+			t.Errorf("game %+v after %q", g, got)
+		}
+		c.s.mu.Unlock()
+		c.close()
 	}
 }
 
