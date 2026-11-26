@@ -253,6 +253,9 @@ their cancellation, and the outbox the bot reads. The game adds:
 - 5 seconds before a song's deadline, the game queues
   `{"op": "react", "chat": <chat>, "post": <the song's post's op ID>, "emoji": "⏰"}`:
   a reaction to its own post, by the op ID, in place of a context's `ref`.
+  On Telegram, which takes only some emoji as reactions, the emoji is 😱:
+  the game keeps the chat's network from when it started (the context's
+  `network` when the bot is on several, else the bot's).
   It needs the `react` permission and signalbot `c755fc7` (branch
   `claude/mcp-addons-geoguess`, or main once it's merged) or newer; an
   unknown post fails the op, with no retry. There's no ⏰ on a song that

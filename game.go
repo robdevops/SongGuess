@@ -328,7 +328,7 @@ func (s *server) openLobby(c *addon.Context, src source, n int, length time.Dura
 // sender at now, with no songs yet. Its End is the caller's to set.
 func (s *server) newGame(c *addon.Context, src source, n int, length time.Duration, now time.Time) *game {
 	return &game{
-		ID: "s" + randomID(6), Chat: c.Chat, Starter: c.Sender, Genre: src.label(),
+		ID: "s" + randomID(6), Chat: c.Chat, Network: s.network(c), Starter: c.Sender, Genre: src.label(),
 		GenreID: src.genre, Decade: src.decade,
 		Count: n, Asked: n, Clip: length, Time: s.cfg.Time,
 		Started: now, Opened: now,
@@ -603,7 +603,7 @@ func (s *server) arm(g *game) {
 	s.armWarn(g)
 }
 
-// armWarn sets g's timer to react ⏰ to its open song's post warnBefore
+// armWarn sets g's timer to react ⏰ (😱 on Telegram) to its open song's post warnBefore
 // its deadline, stopping any earlier one. A song shorter than warnMin, one
 // with warnBefore or less left (after a restart, or ended early: its
 // deadline is now), and one whose post has no ID (the outbox refused it)
@@ -627,8 +627,30 @@ func (s *server) armWarn(g *game) {
 			return
 		}
 		delete(s.warns, chat)
-		s.queue(addon.Op{Op: "react", Chat: chat, Post: post, Emoji: "⏰"})
+		network := g.Network
+		if network == "" { // saved before games kept their network
+			network = s.srv.Network()
+		}
+		s.queue(addon.Op{Op: "react", Chat: chat, Post: post, Emoji: warnEmoji(network)})
 	})
+}
+
+// network is the network of c's chat: its Context's, when the bot is on
+// several, else the bot's own.
+func (s *server) network(c *addon.Context) string {
+	if c.Network != "" {
+		return c.Network
+	}
+	return s.srv.Network()
+}
+
+// warnEmoji is the reaction that warns of 5 seconds left on network:
+// Telegram takes only some emoji as reactions, and not ⏰.
+func warnEmoji(network string) string {
+	if network == "telegram" {
+		return "😱"
+	}
+	return "⏰"
 }
 
 // timeUp reveals song current of the game id in chat, if it is still

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -454,7 +455,18 @@ func (c *client) initialize(replies bool) {
 // bot at signalbot fe51891 does.
 func (c *client) initializeWith(replies, reactions bool) {
 	c.t.Helper()
-	caps := map[string]any{"experimental": map[string]any{vendor + "addon": map[string]any{"version": 1, "network": "signal", "watchReplies": replies, "watchReactions": reactions}}}
+	c.initializeOn(replies, reactions, "signal")
+}
+
+// initializeOn is initializeWith from a bot on networks, the first its
+// own; on more than one it names them all.
+func (c *client) initializeOn(replies, reactions bool, networks ...string) {
+	c.t.Helper()
+	capability := map[string]any{"version": 1, "network": networks[0], "watchReplies": replies, "watchReactions": reactions}
+	if len(networks) > 1 {
+		capability["networks"] = networks
+	}
+	caps := map[string]any{"experimental": map[string]any{vendor + "addon": capability}}
 	var init initializeResult
 	c.result("initialize", map[string]any{
 		"protocolVersion": protocolVersion, "clientInfo": map[string]string{"name": "signalbot", "version": "1"},
@@ -1925,8 +1937,58 @@ func TestNoLobbyChoosesFirst(t *testing.T) {
 // checkWarn checks that op reacts ⏰ to the post with the op ID post.
 func checkWarn(t *testing.T, op outboxOp, post string) {
 	t.Helper()
-	if op.Op != "react" || op.Chat != chat || op.Post != post || post == "" || op.Emoji != "⏰" || op.Ref != "" || op.Text != "" {
-		t.Errorf("⏰ %+v, want on %s", op, post)
+	checkWarnWith(t, op, post, "⏰")
+}
+
+// checkWarnWith is checkWarn with the reaction emoji.
+func checkWarnWith(t *testing.T, op outboxOp, post, emoji string) {
+	t.Helper()
+	if op.Op != "react" || op.Chat != chat || op.Post != post || post == "" || op.Emoji != emoji || op.Ref != "" || op.Text != "" {
+		t.Errorf("%s %+v, want on %s", emoji, op, post)
+	}
+}
+
+// Telegram takes only some emoji as reactions, and not ⏰: there the
+// warning is 😱. The chat's network is its Context's when the bot is on
+// several, else the bot's.
+func TestWarnTelegram(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		networks []string
+		chat     string // the Context's network
+		want     string
+	}{
+		{"telegram", []string{"telegram"}, "", "😱"},
+		{"signal", []string{"signal"}, "", "⏰"},
+		{"a telegram chat", []string{"signal", "telegram"}, "telegram", "😱"},
+		{"a signal chat", []string{"telegram", "signal"}, "signal", "⏰"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+			d := newFakeDeezer(t)
+			c := connect(t, testServer(t, t.TempDir(), clk, &syncBuffer{}, d.srv.URL))
+			c.initializeOn(true, false, tc.networks...)
+			ctx := from(clk, chat, alice)
+			ctx.Network = tc.chat
+			c.song("2", ctx)
+			c.note()
+			page := c.outbox("0")
+			s1 := page.Ops[0]
+			c.ready()
+			c.s.mu.Lock()
+			network := c.s.games[chat].Network
+			c.s.mu.Unlock()
+			if want := cmp.Or(tc.chat, tc.networks[0]); network != want {
+				t.Errorf("the game's network %q, want %q", network, want)
+			}
+			clk.Advance(25 * time.Second)
+			c.note()
+			page = c.outbox(page.Cursor)
+			if len(page.Ops) != 1 {
+				t.Fatalf("song 1's warning %+v", page)
+			}
+			checkWarnWith(t, page.Ops[0], s1.ID, tc.want)
+		})
 	}
 }
 

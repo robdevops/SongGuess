@@ -51,7 +51,7 @@ scoreboard.
 - **Points.** 10 for the title and 5 for the artist. The first player to
   get either gets 5 more, marked ⚡.
 - **Early end.** A song ends as soon as every player has answered.
-- **Hurry.** The bot reacts ⏰ to the song with 5 seconds left.
+- **Hurry.** The bot reacts ⏰ to the song with 5 seconds left (😱 on Telegram, which takes only some emoji as reactions).
 - **No repeats.** A song played in a chat isn't played there again for 30
   days.
 - **After the game.** For an hour, a reply to one of its messages gets

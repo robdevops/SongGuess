@@ -64,7 +64,8 @@ type media struct {
 type game struct {
 	ID        string            `json:"id"` // also the watch's
 	Chat      string            `json:"chat"`
-	Starter   string            `json:"starter"` // who may end it
+	Network   string            `json:"network,omitempty"` // the chat's network, as the bot names it: "telegram", "signal"
+	Starter   string            `json:"starter"`           // who may end it
 	Genre     string            `json:"genre,omitempty"`
 	Count     int               `json:"count"`           // the songs it will play; fewer than asked if the chart runs out
 	Asked     int               `json:"asked,omitempty"` // the songs /song asked for
