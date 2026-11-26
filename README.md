@@ -13,7 +13,9 @@ scoreboard.
 /song pop 10s 3        with a clip length (1s to 25s) and a number of songs (1 to 10), at the end, in either order
 /song help             every command, with the defaults in use
 /song genres           list Deezer's genres and the decades; an unknown genre lists some genres too
-/song end, /song stop  finish now: the open song's reveal and the results (only the player who started it)
+/song start            in a group's lobby, start now, once 2 have joined (only the player who started it; counts as their join)
+/song wait             in a group's lobby, wait 30 seconds longer each time, up to the 15-minute call-off (only the player who started it)
+/song end, /song stop  finish now: the open song's reveal and the results, or call off the lobby (only the player who started it)
 /song scores           this chat's totals over the last 7 days
 ```
 
@@ -24,6 +26,13 @@ scoreboard.
   the last player joins, once there are at least 2. It is called off if
   fewer than 2 have joined after 15 minutes. The songs are chosen while
   players join; if that takes longer, the bot says it's getting them ready.
+- **Lobby buttons.** Where the bot's network shows buttons (Telegram,
+  Discord, Slack), the lobby message has three for the player who started
+  it: ▶️ Start (start now, once 2 have joined; the press counts as their
+  join), ✖️ Cancel (call it off) and ⏱ +30s (wait 30 seconds longer each
+  press, up to the 15-minute call-off). Anyone else pressing gets a pop-up
+  saying only the starter can. On Signal, type `/song start`, `/song stop`
+  and `/song wait` instead.
 - **DMs.** There is no lobby: the game starts at once. Any message is an
   answer.
 - **Answer.** In a group, reply to the song's message. Name the title, the
@@ -42,7 +51,7 @@ By default the songs are sung mainly in English, as the bot's model judges.
 
 ## Quick start
 
-You need signalbot at `c755fc7` (branch `claude/mcp-addons-geoguess`, or main once it's merged) or newer (for the ⏰ reaction to its own post), and Go 1.27 or newer.
+You need signalbot at `c57871e` (branch `claude/busy-maxwell-jo5ojy`, or main once it's merged) or newer (for the lobby's buttons; `c755fc7` or newer for the ⏰ reaction to its own post), and Go 1.27 or newer.
 
 1. **Build it:**
 

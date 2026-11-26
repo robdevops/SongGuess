@@ -87,6 +87,7 @@ type game struct {
 	judging   bool              // the model is judging the open song's answers
 	Joined    []string          `json:"joined,omitempty"`   // who has joined
 	LastJoin  time.Time         `json:"lastJoin,omitempty"` // when the last player joined: the game starts lobbyWait after
+	Extra     time.Duration     `json:"extra,omitempty"`    // the starter's extra wait, from ⏱ +30s or /song wait, added to lobbyWait
 	CallOff   time.Time         `json:"callOff,omitempty"`  // when the lobby gives up with fewer than minPlayers
 	Seq       int               `json:"seq"`                // the answers recorded so far, to break ties
 	Points    map[string]int    `json:"points"`             // by player

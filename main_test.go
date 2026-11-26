@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -629,7 +630,7 @@ func TestInitializeAndTools(t *testing.T) {
 			t.Errorf("tool %+v", tl)
 		}
 	}
-	if !slices.Equal(names, []string{"song", "song_answer"}) {
+	if !slices.Equal(names, []string{"song", "song_answer", "song_press"}) {
 		t.Errorf("tools %v", names)
 	}
 	if r := c.request("tools/call", map[string]any{"name": "nope"}); r.Error == nil || r.Error.Code != codeInvalidParams {
@@ -1402,7 +1403,7 @@ func TestFewerThanAsked(t *testing.T) {
 func TestHelp(t *testing.T) {
 	clk, c, _, _ := begin(t)
 	got := words(c.song("help", from(clk, chat, alice)))
-	for _, want := range []string{"/song [genre or decade] [clip length] [rounds]", "/song 80s 10s 3", "/song genres", "/song end", "/song scores", "Title 10 pts"} {
+	for _, want := range []string{"/song [genre or decade] [clip length] [rounds]", "/song 80s 10s 3", "/song genres", "/song start", "/song wait", "/song end", "/song scores", "Title 10 pts"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help lacks %q:\n%s", want, got)
 		}
@@ -2102,5 +2103,347 @@ func TestWarnShort(t *testing.T) {
 	clk.Advance(warnMin - time.Second - warnBefore)
 	if p := c.outbox(page.Cursor); len(p.Ops) != 0 {
 		t.Errorf("ops on a 9s song: %+v", p)
+	}
+}
+
+// initializeButtons is the handshake of a bot whose network shows
+// buttons, with reply and reaction watches.
+func (c *client) initializeButtons() {
+	c.t.Helper()
+	caps := map[string]any{"experimental": map[string]any{vendor + "addon": map[string]any{"version": 1, "network": "telegram", "watchReplies": true, "watchReactions": true, "buttons": true}}}
+	c.result("initialize", map[string]any{"protocolVersion": protocolVersion, "capabilities": caps}, new(initializeResult))
+	c.send(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	c.result("resources/subscribe", uriParams{outboxURI}, new(struct{}))
+}
+
+// press is a press of the button with data, as the bot passes it.
+func (c *client) press(data string, ctx callContext) string {
+	c.t.Helper()
+	return words(c.tool("song_press", map[string]string{"press": data}, ctx))
+}
+
+// buttonLobby is a server whose bot shows buttons, with a lobby opened by
+// alice in chat, its songs chosen; it returns the intro too.
+func buttonLobby(t *testing.T, block bool) (*fakeClock, *client, *fakeDeezer, *syncBuffer, toolResult) {
+	t.Helper()
+	clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+	logs := &syncBuffer{}
+	d := newFakeDeezer(t)
+	if block {
+		d.block()
+	}
+	c := connect(t, testServer(t, t.TempDir(), clk, logs, d.srv.URL))
+	c.initializeButtons()
+	r := c.song("2", from(clk, chat, alice))
+	if !block {
+		c.ready()
+	}
+	return clk, c, d, logs, r
+}
+
+// songPosts are the posts with a clip among ops.
+func songPosts(ops []outboxOp) int {
+	n := 0
+	for _, op := range ops {
+		if op.Audio != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// The lobby has the starter's three buttons, in one row, only in a group
+// and only where the bot shows buttons.
+func TestLobbyButtons(t *testing.T) {
+	clk, c, _, _, r := buttonLobby(t, false)
+	id := r.Meta.Watch.ID
+	want := [][]addon.Button{{{Label: "▶️ Start", Data: "start:" + id}, {Label: "✖️ Cancel", Data: "cancel:" + id}, {Label: "⏱ +30s", Data: "wait:" + id}}}
+	if !reflect.DeepEqual(r.Meta.Buttons, want) || r.Meta.OnPress != "song_press" {
+		t.Fatalf("buttons %+v, onPress %q", r.Meta.Buttons, r.Meta.OnPress)
+	}
+	if !strings.Contains(words(r), "▶️ Start (or /song start)") {
+		t.Errorf("intro %q", words(r))
+	}
+	dm := from(clk, "c_dm", alice)
+	dm.Group = false
+	if r := c.song("2", dm); r.Meta == nil || r.Meta.Buttons != nil || r.Meta.OnPress != "" {
+		t.Errorf("a DM has buttons: %+v", r.Meta)
+	}
+
+	clk2 := &fakeClock{now: clk.Now()}
+	d := newFakeDeezer(t)
+	c2 := connect(t, testServer(t, t.TempDir(), clk2, &syncBuffer{}, d.srv.URL))
+	c2.initializeWith(true, true)
+	r2 := c2.song("2", from(clk2, chat, alice))
+	c2.ready()
+	if r2.Meta == nil || r2.Meta.Buttons != nil || r2.Meta.OnPress != "" || !strings.Contains(words(r2), "begin now with /song start") {
+		t.Errorf("buttons without the capability: %+v %q", r2.Meta, words(r2))
+	}
+}
+
+// ▶️ Start: the starter's only; their press is their join; with too few
+// it waits; with enough the game starts at once; after it, and under an
+// older lobby, a press does nothing.
+func TestPressStart(t *testing.T) {
+	clk, c, _, _, r := buttonLobby(t, false)
+	id := r.Meta.Watch.ID
+	if got := c.press("start:"+id, from(clk, chat, bob)); got != notStarter {
+		t.Errorf("bob's press: %q", got)
+	}
+	if got := c.press("start:"+id, from(clk, chat, alice)); got != needPlayers {
+		t.Errorf("alone: %q", got)
+	}
+	c.s.mu.Lock()
+	joined := slices.Clone(c.s.games[chat].Joined)
+	c.s.mu.Unlock()
+	if !slices.Equal(joined, []string{alice}) {
+		t.Errorf("joined %v", joined)
+	}
+	if p := c.outbox("0"); len(p.Ops) != 0 {
+		t.Fatalf("started alone: %+v", p)
+	}
+	if got := c.press("start:sother", from(clk, chat, alice)); got != gameOver {
+		t.Errorf("an older lobby's press: %q", got)
+	}
+	c.react(false, from(clk, chat, bob))
+	clk.Advance(5 * time.Second)
+	if got := c.press("start:"+id, from(clk, chat, alice)); got != startingNow {
+		t.Errorf("with 2: %q", got)
+	}
+	page := c.outbox("0")
+	if len(page.Ops) != 1 {
+		t.Fatalf("ops %+v", page)
+	}
+	checkSong(t, page.Ops[0], 1, 2)
+	c.s.mu.Lock()
+	if g := c.s.games[chat]; g.Lobby || !slices.Equal(g.Players, []string{alice, bob}) || !g.Started.Equal(clk.Now()) {
+		t.Errorf("game %+v", g)
+	}
+	c.s.mu.Unlock()
+	for _, data := range []string{"start:", "cancel:", "wait:"} {
+		if got := c.press(data+id, from(clk, chat, alice)); got != alreadyBegun {
+			t.Errorf("%s after the start: %q", data, got)
+		}
+	}
+	clk.Advance(lobbyWait) // the lobby's timer doesn't start it again
+	if p := c.outbox(page.Cursor); songPosts(p.Ops) != 0 {
+		t.Errorf("started twice: %+v", p)
+	}
+	c.song("end", from(clk, chat, alice))
+	if got := c.press("start:"+id, from(clk, chat, alice)); got != gameOver {
+		t.Errorf("after the end: %q", got)
+	}
+}
+
+// ▶️ Start while the songs are still chosen starts the game as the timer
+// would: a post says they are being made ready.
+func TestPressStartPreparing(t *testing.T) {
+	clk, c, d, _, r := buttonLobby(t, true)
+	d.asked(t)
+	c.react(false, from(clk, chat, alice))
+	c.react(false, from(clk, chat, bob))
+	if got := c.press("start:"+r.Meta.Watch.ID, from(clk, chat, alice)); got != startingNow {
+		t.Fatalf("press %q", got)
+	}
+	page := c.outbox("0")
+	if len(page.Ops) != 1 || page.Ops[0].Text != gettingReady {
+		t.Fatalf("ops %+v", page)
+	}
+	d.release()
+	waitFor(t, c.s, "song 1", func() bool { g := c.s.games[chat]; return g != nil && g.Post != "" })
+	if p := c.outbox(page.Cursor); len(p.Ops) != 1 {
+		t.Fatalf("ops %+v", p)
+	} else {
+		checkSong(t, p.Ops[0], 1, 2)
+	}
+}
+
+// ✖️ Cancel: the starter's only; it calls the lobby off as /song stop
+// does, saying so in the chat.
+func TestPressCancel(t *testing.T) {
+	clk, c, _, _, r := buttonLobby(t, false)
+	id := r.Meta.Watch.ID
+	if got := c.press("cancel:"+id, from(clk, chat, bob)); got != notStarter {
+		t.Errorf("bob's press: %q", got)
+	}
+	if got := c.press("cancel:"+id, from(clk, chat, alice)); got != cancelled {
+		t.Errorf("press %q", got)
+	}
+	page := c.outbox("0")
+	if len(page.Ops) != 2 || page.Ops[0].Text != lobbyOff || page.Ops[1].Op != "unwatch" || page.Ops[1].Watch != id {
+		t.Fatalf("ops %+v", page)
+	}
+	c.s.mu.Lock()
+	if c.s.games[chat] != nil {
+		t.Error("the game goes on")
+	}
+	c.s.mu.Unlock()
+	if got := c.press("start:"+id, from(clk, chat, alice)); got != gameOver {
+		t.Errorf("after the cancel: %q", got)
+	}
+	clk.Advance(lobbyMax)
+	if p := c.outbox(page.Cursor); len(p.Ops) != 0 {
+		t.Errorf("after the cancel %+v", p)
+	}
+}
+
+// ⏱ +30s: the starter's only; each press adds 30s, which later joins keep;
+// never past the call-off; it is saved.
+func TestPressWait(t *testing.T) {
+	clk, c, _, _, r := buttonLobby(t, false)
+	id := r.Meta.Watch.ID
+	if got := c.press("wait:"+id, from(clk, chat, bob)); got != notStarter {
+		t.Errorf("bob's press: %q", got)
+	}
+	c.react(false, from(clk, chat, alice))
+	c.react(false, from(clk, chat, bob)) // armed for lobbyWait from now
+	if got := c.press("wait:"+id, from(clk, chat, alice)); got != waitLonger {
+		t.Errorf("press %q", got)
+	}
+	if got := c.press("wait:"+id, from(clk, chat, alice)); got != waitLonger {
+		t.Errorf("press %q", got)
+	}
+	clk.Advance(lobbyWait + 50*time.Second)
+	c.react(false, from(clk, chat, "u_carol")) // a later join keeps the extra minute
+	clk.Advance(lobbyWait + 59*time.Second)
+	if p := c.outbox("0"); len(p.Ops) != 0 {
+		t.Fatalf("started before its wait: %+v", p)
+	}
+	c.s.mu.Lock()
+	data, _ := json.Marshal(c.s.games[chat])
+	c.s.mu.Unlock()
+	if !strings.Contains(string(data), `"extra":60000000000`) {
+		t.Errorf("not saved: %s", data)
+	}
+	clk.Advance(time.Second)
+	if p := c.outbox("0"); len(p.Ops) != 1 {
+		t.Fatalf("ops %+v", p)
+	}
+}
+
+// ⏱ +30s stops at the lobby's call-off.
+func TestPressWaitCap(t *testing.T) {
+	clk, c, _, _, r := buttonLobby(t, false)
+	id := r.Meta.Watch.ID
+	start := clk.Now()
+	c.react(false, from(clk, chat, alice))
+	c.react(false, from(clk, chat, bob))
+	got, n := "", 0
+	for ; n < 100; n++ {
+		if got = c.press("wait:"+id, from(clk, chat, alice)); got != waitLonger {
+			break
+		}
+	}
+	if got != noLonger || n != int((lobbyMax-lobbyWait)/waitStep) {
+		t.Fatalf("after %d presses: %q", n, got)
+	}
+	if got := c.press("wait:"+id, from(clk, chat, alice)); got != noLonger {
+		t.Errorf("again: %q", got)
+	}
+	c.s.mu.Lock()
+	at := startAt(c.s.games[chat])
+	c.s.mu.Unlock()
+	if !at.Equal(start.Add(lobbyMax)) {
+		t.Errorf("starts at %v, want %v", at, start.Add(lobbyMax))
+	}
+	clk.Advance(lobbyMax - time.Second)
+	if p := c.outbox("0"); len(p.Ops) != 0 {
+		t.Fatalf("ops %+v", p)
+	}
+	clk.Advance(time.Second)
+	if p := c.outbox("0"); songPosts(p.Ops) != 1 {
+		t.Fatalf("ops %+v", p)
+	}
+}
+
+// The typed /song start, /song wait and /song stop do what the buttons
+// do, with the same rules, where the network has no buttons.
+func TestTypedLobby(t *testing.T) {
+	clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+	d := newFakeDeezer(t)
+	c := connect(t, testServer(t, t.TempDir(), clk, &syncBuffer{}, d.srv.URL))
+	c.initializeWith(true, true)
+	if got := words(c.song("start", from(clk, chat, alice))); got != noGame {
+		t.Errorf("no game: %q", got)
+	}
+	r := c.song("2", from(clk, chat, alice))
+	c.ready()
+	if r.Meta.Buttons != nil {
+		t.Errorf("buttons on Signal: %+v", r.Meta.Buttons)
+	}
+	for _, cmd := range []string{"start", "wait"} {
+		if got := words(c.song(cmd, from(clk, chat, bob))); got != notStarter {
+			t.Errorf("bob's %s: %q", cmd, got)
+		}
+	}
+	if got := words(c.song("stop", from(clk, chat, bob))); got != "Only the player who started this song quiz can end it." {
+		t.Errorf("bob's stop: %q", got)
+	}
+	if got := words(c.song("start", from(clk, chat, alice))); got != needPlayers {
+		t.Errorf("alone: %q", got)
+	}
+	c.react(false, from(clk, chat, bob))
+	if got := words(c.song("wait", from(clk, chat, alice))); got != waitLonger {
+		t.Errorf("wait: %q", got)
+	}
+	clk.Advance(lobbyWait)
+	if p := c.outbox("0"); len(p.Ops) != 0 {
+		t.Fatalf("didn't wait: %+v", p)
+	}
+	if got := words(c.song("START", from(clk, chat, alice))); got != startingNow {
+		t.Errorf("start: %q", got)
+	}
+	if p := c.outbox("0"); songPosts(p.Ops) != 1 {
+		t.Fatalf("ops %+v", p)
+	}
+	for _, cmd := range []string{"start", "wait"} {
+		if got := words(c.song(cmd, from(clk, chat, alice))); got != alreadyBegun {
+			t.Errorf("%s after the start: %q", cmd, got)
+		}
+	}
+	c.song("end", from(clk, chat, alice))
+
+	c.song("2", from(clk, chat, alice))
+	c.ready()
+	if got := words(c.song("stop", from(clk, chat, alice))); got != lobbyOff {
+		t.Errorf("stop: %q", got)
+	}
+}
+
+// A press and the lobby's timer at once start the game once.
+func TestPressRacesTimer(t *testing.T) {
+	for range 20 {
+		clk, c, _, logs, r := buttonLobby(t, false)
+		c.react(false, from(clk, chat, alice))
+		c.react(false, from(clk, chat, bob))
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() { defer wg.Done(); clk.Advance(lobbyWait) }()
+		got := c.press("start:"+r.Meta.Watch.ID, from(clk, chat, alice))
+		wg.Wait()
+		if got != startingNow && got != alreadyBegun {
+			t.Errorf("press %q", got)
+		}
+		if p := c.outbox("0"); songPosts(p.Ops) != 1 {
+			t.Fatalf("song posts %+v", p)
+		}
+		if n := strings.Count(logs.String(), "began:"); n != 1 {
+			t.Fatalf("began %d times", n)
+		}
+		c.close()
+	}
+}
+
+// /song in the lobby says the game is waiting for players, not on a song.
+func TestLobbyBusy(t *testing.T) {
+	clk, c, _, _, _ := buttonLobby(t, false)
+	if got := words(c.song("", from(clk, chat, bob))); got != lobbyBusyText {
+		t.Errorf("in the lobby: %q", got)
+	}
+	c.react(false, from(clk, chat, alice))
+	c.react(false, from(clk, chat, bob))
+	clk.Advance(lobbyWait)
+	if got := words(c.song("", from(clk, chat, bob))); got != "A song quiz is on: song 1 of 2." {
+		t.Errorf("after it: %q", got)
 	}
 }
