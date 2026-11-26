@@ -2158,7 +2158,7 @@ func lobbyRow(id string, n, songs int, clip string) [][]addon.Button {
 	row := []addon.Button{
 		{Label: fmt.Sprintf("✋ Ready: %d", n), Data: "ready:" + id},
 		{Label: fmt.Sprintf("Songs: %d", songs), Data: "t1:" + id},
-		{Label: "Clip length: " + clip, Data: "t2:" + id},
+		{Label: "Clip: " + clip, Data: "t2:" + id},
 	}
 	if n >= 2 {
 		row = append(row, addon.Button{Label: "▶️ Start", Data: "start:" + id})
@@ -2415,7 +2415,7 @@ func TestPressToggles(t *testing.T) {
 	if g := c.game(); g.Count != 4 || g.Preparing {
 		t.Errorf("4 again: %+v", g)
 	}
-	if got := c.press("t2:"+id, from(clk, chat, alice)); got != "Clip length: 10s" {
+	if got := c.press("t2:"+id, from(clk, chat, alice)); got != "Clip: 10s" {
 		t.Errorf("t2: %q", got)
 	}
 	c.ready()
@@ -2460,7 +2460,7 @@ func TestPressTogglesCap(t *testing.T) {
 		t1, t2     string // the pop-ups
 		songs, max int
 	}{
-		{"8 20s", "Songs: 10", "Clip length: 30s", 8, maxSongs},
+		{"8 20s", "Songs: 10", "Clip: 30s", 8, maxSongs},
 		{"10 30s", atMost, atMost, 10, 10},
 	} {
 		clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}

@@ -364,7 +364,7 @@ func lobbyRows(g *game) [][]addon.Button {
 	row := []addon.Button{
 		{Label: fmt.Sprintf("✋ Ready: %d", len(g.Joined)), Data: "ready:" + g.ID},
 		{Label: fmt.Sprintf("Songs: %d", g.Asked), Data: "t1:" + g.ID},
-		{Label: "Clip length: " + lengthLabel(g.Clip), Data: "t2:" + g.ID},
+		{Label: "Clip: " + lengthLabel(g.Clip), Data: "t2:" + g.ID},
 	}
 	if len(g.Joined) >= minPlayers {
 		row = append(row, addon.Button{Label: "▶️ Start", Data: "start:" + g.ID})
@@ -413,7 +413,7 @@ func (s *server) toggleLocked(g *game, action string) string {
 		} else {
 			g.Clip = g.BaseClip
 		}
-		text = "Clip length: " + lengthLabel(g.Clip)
+		text = "Clip: " + lengthLabel(g.Clip)
 	}
 	s.rechooseLocked(g)
 	s.showLobby(g)

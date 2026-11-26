@@ -236,7 +236,7 @@ their cancellation, and the outbox the bot reads. The game adds:
   15 minutes) posts why, then an `unwatch`.
 - Where the bot offers `buttons`, the lobby's answer has one row,
   `onPress: "song_press"`: `✋ Ready: N` (`ready:<id>`, anyone's),
-  `Songs: N` (`t1:<id>`), `Clip length: Ns` (`t2:<id>`), `▶️ Start`
+  `Songs: N` (`t1:<id>`), `Clip: Ns` (`t2:<id>`), `▶️ Start`
   (`start:<id>`, shown from 2 players) and `✖️ Cancel` (`cancel:<id>`),
   `<id>` the watch's. The lobby then has no countdown: only ▶️ Start or
   `/song start` starts it, and `/song wait` (or an older lobby's

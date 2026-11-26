@@ -30,10 +30,10 @@ scoreboard.
   join; if that takes longer, the bot says it's getting them ready.
 - **Lobby buttons.** Where the bot's network shows buttons (Telegram,
   Discord, Slack), the lobby message has one row:
-  `✋ Ready: N` · `Songs: N` · `Clip length: Ns` · `▶️ Start` · `✖️ Cancel`.
+  `✋ Ready: N` · `Songs: N` · `Clip: Ns` · `▶️ Start` · `✖️ Cancel`.
   ✋ Ready is anyone's, and shows how many have joined (a pop-up says so,
   or that you're already in). The rest are the player who started it's:
-  `Songs` and `Clip length` each switch between what the game was opened
+  `Songs` and `Clip` each switch between what the game was opened
   with (`SONGS_SONGS`, or what `/song` was typed with) and double that, up
   to the game's most (10 songs, 30s clips; at the most already, a press
   says "Already the most."); ▶️ Start appears once 2 have joined and
