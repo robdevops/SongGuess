@@ -88,10 +88,20 @@ type game struct {
 	Joined    []string          `json:"joined,omitempty"`   // who has joined
 	LastJoin  time.Time         `json:"lastJoin,omitempty"` // when the last player joined: the game starts lobbyWait after
 	Extra     time.Duration     `json:"extra,omitempty"`    // the starter's extra wait, from ⏱ +30s or /song wait, added to lobbyWait
-	CallOff   time.Time         `json:"callOff,omitempty"`  // when the lobby gives up with fewer than minPlayers
-	Seq       int               `json:"seq"`                // the answers recorded so far, to break ties
-	Points    map[string]int    `json:"points"`             // by player
-	Right     map[string]int    `json:"right"`              // songs with something right, by player
+	CallOff   time.Time         `json:"callOff,omitempty"`  // when the lobby gives up with fewer than minPlayers, or, with buttons, unstarted
+	// Buttons: its lobby shows buttons, so it has no countdown: the
+	// starter starts it, and may first toggle its songs (Asked) and clip
+	// length (Clip) between the lobby's first ones, BaseSongs and
+	// BaseClip, and double those.
+	Buttons   bool          `json:"buttons,omitempty"`
+	BaseSongs int           `json:"baseSongs,omitempty"`
+	BaseClip  time.Duration `json:"baseClip,omitempty"`
+	// The songs, and the clip length, its songs were chosen for.
+	Gathered     int            `json:"gathered,omitempty"`
+	GatheredClip time.Duration  `json:"gatheredClip,omitempty"`
+	Seq          int            `json:"seq"`    // the answers recorded so far, to break ties
+	Points       map[string]int `json:"points"` // by player
+	Right        map[string]int `json:"right"`  // songs with something right, by player
 }
 
 // answer is what one player's last answer to the open song got right, and

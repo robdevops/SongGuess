@@ -10,11 +10,11 @@ scoreboard.
 /song                  SONGS_SONGS songs (5 by default) from Deezer's chart of all genres
 /song rock             from a genre's chart: Deezer's genre names, without "Music", such as pop, rock, rap, hip hop, latin, games
 /song 80s              a decade's hits, from Deezer's editors' playlists: 60s, 70s, 80s, 90s, 2000s, 2010s, 2020s
-/song pop 10s 3        with a clip length (1s to 25s) and a number of songs (1 to 10), at the end, in either order
+/song pop 10s 3        with a clip length (1s to 30s) and a number of songs (1 to 10), at the end, in either order
 /song help             every command, with the defaults in use
 /song genres           list Deezer's genres and the decades; an unknown genre lists some genres too
 /song start            in a group's lobby, start now, once 2 have joined (only the player who started it; counts as their join)
-/song wait             in a group's lobby, wait 30 seconds longer each time, up to the 15-minute call-off (only the player who started it)
+/song wait             on Signal, in a group's lobby, wait 30 seconds longer each time, up to the 15-minute call-off (only the player who started it)
 /song end, /song stop  finish now: the open song's reveal and the results, or call off the lobby (only the player who started it)
 /song scores           this chat's totals over the last 7 days
 ```
@@ -24,18 +24,24 @@ scoreboard.
 - **Join.** In a group, press ✋ Ready under the lobby message on
   Telegram, Discord and Slack, or react to it with any emoji (on Signal,
   the only way). Each player joins for themselves; the player who starts
-  it must join too. The game starts 30 seconds after the last player
-  joins, once there are at least 2. It is called off if fewer than 2 have
-  joined after 15 minutes. The songs are chosen while players join; if
-  that takes longer, the bot says it's getting them ready.
+  it must join too. On Signal the game starts 30 seconds after the last
+  player joins, once there are at least 2; it is called off if fewer
+  than 2 have joined after 15 minutes. The songs are chosen while players
+  join; if that takes longer, the bot says it's getting them ready.
 - **Lobby buttons.** Where the bot's network shows buttons (Telegram,
-  Discord, Slack), the lobby message has ✋ Ready, for anyone (a pop-up
-  says how many have joined, or that you're already in), and under it
-  three for the player who started it: ▶️ Start (start now, once 2 have
-  joined; the press counts as their join), ✖️ Cancel (call it off) and
-  ⏱ +30s (wait 30 seconds longer each press, up to the 15-minute
-  call-off). Anyone else pressing those gets a pop-up saying only the
-  starter can. On Signal, type `/song start`, `/song stop` and
+  Discord, Slack), the lobby message has one row:
+  `✋ Ready: N` · `Songs: N` · `Clip length: Ns` · `▶️ Start` · `✖️ Cancel`.
+  ✋ Ready is anyone's, and shows how many have joined (a pop-up says so,
+  or that you're already in). The rest are the player who started it's:
+  `Songs` and `Clip length` each switch between what the game was opened
+  with (`SONGS_SONGS`, or what `/song` was typed with) and double that, up
+  to the game's most (10 songs, 30s clips; at the most already, a press
+  says "Already the most."); ▶️ Start appears once 2 have joined and
+  starts the game (the press counts as their join); ✖️ Cancel calls it
+  off. There's no countdown: the game starts only with ▶️ Start (or
+  `/song start`), and the lobby is called off after 15 minutes if it
+  hasn't. Anyone else pressing the starter's buttons gets a pop-up saying
+  only the starter can. On Signal, type `/song start`, `/song stop` and
   `/song wait` instead.
 - **DMs.** There is no lobby: the game starts at once. Any message is an
   answer.
@@ -55,7 +61,7 @@ By default the songs are sung mainly in English, as the bot's model judges.
 
 ## Quick start
 
-You need signalbot at `c57871e` (branch `claude/busy-maxwell-jo5ojy`, or main once it's merged) or newer (for the lobby's buttons; `c755fc7` or newer for the ⏰ reaction to its own post), and Go 1.27 or newer.
+You need signalbot at `f6a3c5c` (branch `claude/busy-maxwell-jo5ojy`, or main once it's merged) or newer (for the lobby's buttons and their updates; `c755fc7` or newer for the ⏰ reaction to its own post), and Go 1.27 or newer.
 
 1. **Build it:**
 

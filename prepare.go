@@ -405,7 +405,7 @@ func (s *server) gathered(ctx context.Context, chat, id string, src source, n in
 	}
 	s.mu.Lock()
 	g := s.games[chat]
-	if g == nil || g.ID != id || !g.Preparing {
+	if g == nil || g.ID != id || !g.Preparing || errors.Is(ctx.Err(), context.Canceled) { // ended, or chosen again after a toggle
 		s.mu.Unlock()
 		return
 	}
@@ -419,6 +419,7 @@ func (s *server) gathered(ctx context.Context, chat, id string, src source, n in
 	}
 	g.Preparing = false
 	g.Songs, g.Pool, g.Count = []track{t}, pool, min(n, 1+len(pool))
+	g.Gathered, g.GatheredClip = n, length
 	s.media[id] = map[int]media{0: m}
 	s.log.Printf("game %s ready: %d songs", id, g.Count)
 	if !g.Lobby { // its players were waiting for the songs

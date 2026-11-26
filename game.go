@@ -27,7 +27,7 @@ const (
 	noSongs      = "I couldn't get a song to play just now. Try again, or try another genre."
 	allPlayed    = "Every song in that chart was played here in the last 30 days. Try another genre."
 	badCount     = "A song quiz can have 1 to 10 songs, such as /song rock 5."
-	badClip      = "A clip can be 1s to 25s long, such as /song rock 10s."
+	badClip      = "A clip can be 1s to 30s long, such as /song rock 10s."
 	notYet       = "Wait for the next song."
 	notStarted   = "The song quiz hasn't started yet."
 	gettingReady = "🎵 Getting the songs ready…"
@@ -44,12 +44,17 @@ const (
 	gameOver      = "That game is over."
 	startingNow   = "Starting!"
 	needPlayers   = "Waiting for at least 2 players: react to join."
+	needReady     = "Waiting for at least 2 players: press ✋ Ready to join."
 	alreadyIn     = "You're already in."
 	cancelled     = "Cancelled."
 	lobbyOff      = "The song quiz is off."
 	waitLonger    = "Starts 30s later."
 	noLonger      = "Can't wait any longer."
 	lobbyBusyText = "A song quiz is waiting for players: react to its message to join, or /song start."
+	readyBusyText = "A song quiz is waiting for players: press ✋ Ready under its message to join."
+	noCountdown   = "There's no countdown: whoever started it presses ▶️ Start once everyone's in."
+	atMost        = "Already the most."
+	noStartText   = "Nobody pressed ▶️ Start, so the song quiz is off."
 )
 
 // waitStep is what one ⏱ +30s, or /song wait, adds to the lobby's wait.
@@ -202,6 +207,9 @@ func startsWithDigit(s string) bool { return s != "" && s[0] >= '0' && s[0] <= '
 
 // busy is the answer to /song while a game is on.
 func busy(g *game) addon.Result {
+	if g.Lobby && g.Buttons {
+		return addon.Text(readyBusyText)
+	}
 	if g.Lobby {
 		return addon.Text(lobbyBusyText)
 	}
@@ -279,7 +287,7 @@ func (s *server) start(ctx context.Context, c *addon.Context, genreName string, 
 		g.Players = []string{c.Sender}
 	}
 	s.tryPost(g)
-	text := intro(g, s.srv.Buttons())
+	text := intro(g)
 	s.mu.Unlock()
 	s.save()
 	s.log.Printf("game %s started: %d songs, %s clips, %s to answer", g.ID, count, length, g.Time)
@@ -299,11 +307,17 @@ func (s *server) openLobby(c *addon.Context, src source, n int, length time.Dura
 	g := s.newGame(c, src, n, length, now)
 	// Preparing overlaps the lobby: only what it may take past it counts.
 	g.End = now.Add(max(lobbyMax, prepMax) + s.playTime(n))
+	if s.srv.Buttons() {
+		// The starter may double the songs, and have them chosen again,
+		// until the lobby's last moment: the watch covers that too.
+		g.Buttons, g.BaseSongs, g.BaseClip = true, n, length
+		g.End = now.Add(lobbyMax + prepMax + s.playTime(doubled(n, maxSongs)))
+	}
 	g.Lobby, g.CallOff, g.Preparing = true, now.Add(lobbyMax), true
 	s.games[c.Chat] = g
 	s.armLobby(g)
 	s.gatherGame(g)
-	text := intro(g, s.srv.Buttons())
+	text := intro(g)
 	s.mu.Unlock()
 	s.save()
 	s.log.Printf("game %s opened its lobby: %d songs, %s clips, %s to answer", g.ID, n, length, g.Time)
@@ -330,34 +344,110 @@ func (s *server) playTime(count int) time.Duration {
 
 // introResult is the answer to /song that begins g: text, its intro, and
 // the watch that takes the replies, and in a lobby the reactions.
-// In a lobby, where the bot shows buttons, it has ✋ Ready, for anyone to
-// join, above the starter's ▶️ Start, ✖️ Cancel and ⏱ +30s.
+// In a lobby, where the bot shows buttons, it has lobbyRows.
 func (s *server) introResult(g *game, text string) addon.Result {
 	meta := &addon.ResultMeta{Watch: &addon.Watch{
 		ID: g.ID, Replies: true, Reactions: g.Lobby, Until: g.End.Add(watchSlack).Format(time.RFC3339), Tool: "song_answer", Over: "That song quiz is over. Start another with /song.",
 	}}
-	if g.Lobby && s.srv.Buttons() {
-		meta.Buttons = [][]addon.Button{
-			{{Label: "✋ Ready", Data: "ready:" + g.ID}},
-			{
-				{Label: "▶️ Start", Data: "start:" + g.ID},
-				{Label: "✖️ Cancel", Data: "cancel:" + g.ID},
-				{Label: "⏱ +30s", Data: "wait:" + g.ID},
-			},
-		}
+	if g.Lobby && g.Buttons {
+		meta.Buttons = lobbyRows(g)
 		meta.OnPress = "song_press"
 	}
 	return addon.Result{Content: addon.Text(clamp(text, maxPost)).Content, Meta: meta}
 }
 
+// lobbyRows are the buttons of g's lobby, in one row: ✋ Ready, for anyone
+// to join, with the players joined so far; then the starter's toggles of
+// the number of songs and the clip length, ▶️ Start once enough have
+// joined, and ✖️ Cancel.
+func lobbyRows(g *game) [][]addon.Button {
+	row := []addon.Button{
+		{Label: fmt.Sprintf("✋ Ready: %d", len(g.Joined)), Data: "ready:" + g.ID},
+		{Label: fmt.Sprintf("Songs: %d", g.Asked), Data: "t1:" + g.ID},
+		{Label: "Clip length: " + lengthLabel(g.Clip), Data: "t2:" + g.ID},
+	}
+	if len(g.Joined) >= minPlayers {
+		row = append(row, addon.Button{Label: "▶️ Start", Data: "start:" + g.ID})
+	}
+	row = append(row, addon.Button{Label: "✖️ Cancel", Data: "cancel:" + g.ID})
+	return [][]addon.Button{row}
+}
+
+// showLobby replaces the buttons under g's intro with its lobby's rows as
+// they are now, where its lobby has buttons. s.mu is held.
+func (s *server) showLobby(g *game) {
+	if g.Lobby && g.Buttons {
+		s.queue(addon.Op{Op: "buttons", Chat: g.Chat, Watch: g.ID, Buttons: lobbyRows(g)})
+	}
+}
+
+// doubled is a toggle's second mode: double its first, base, but at most
+// most; equal to base if base is already the most.
+func doubled[T int | time.Duration](base, most T) T { return max(min(2*base, most), base) }
+
+// toggleLocked flips g's number of songs (t1) or clip length (t2) between
+// what its lobby opened with and double that, at most the game's limit,
+// and has its songs chosen again if those chosen no longer do; it answers
+// with the press's pop-up. Its caller saves. s.mu is held.
+func (s *server) toggleLocked(g *game, action string) string {
+	var text string
+	switch action {
+	case "t1":
+		alt := doubled(g.BaseSongs, maxSongs)
+		if alt == g.BaseSongs {
+			return atMost
+		}
+		if g.Asked == g.BaseSongs {
+			g.Asked = alt
+		} else {
+			g.Asked = g.BaseSongs
+		}
+		text = fmt.Sprintf("Songs: %d", g.Asked)
+	case "t2":
+		alt := doubled(g.BaseClip, maxClip)
+		if alt == g.BaseClip {
+			return atMost
+		}
+		if g.Clip == g.BaseClip {
+			g.Clip = alt
+		} else {
+			g.Clip = g.BaseClip
+		}
+		text = "Clip length: " + lengthLabel(g.Clip)
+	}
+	s.rechooseLocked(g)
+	s.showLobby(g)
+	return text
+}
+
+// rechooseLocked fits the songs chosen for g, in its lobby, to its number
+// of songs and clip length, after a toggle: while they are chosen, the
+// choosing starts again; once they are, it keeps them if they were chosen
+// for as many songs or more, with clips as long, and otherwise chooses
+// them again. s.mu is held.
+func (s *server) rechooseLocked(g *game) {
+	if !g.Preparing && g.Asked <= g.Gathered && g.Clip == g.GatheredClip {
+		g.Count = min(g.Asked, len(g.Songs)+len(g.Pool))
+		return
+	}
+	g.Preparing, g.Count = true, g.Asked
+	g.Songs, g.Pool = nil, nil
+	delete(s.media, g.ID)
+	s.gatherGame(g)
+}
+
 // helpText is /song help: every command, with the defaults in use.
 func (s *server) helpText() string {
+	lobby := "/song start · /song wait (+30s) · /song end (or stop) · /song scores\n"
+	if s.srv.Buttons() {
+		lobby = "/song start · /song end (or stop) · /song scores\n"
+	}
 	return fmt.Sprintf("🎵 **Song quiz**: reply to each clip with the title or artist.\n"+
 		"/song [genre or decade] [clip length] [rounds]\n"+
 		"e.g. /song, /song rock, /song 80s 10s 3\n"+
 		"/song genres — what you can pick\n"+
-		"/song start · /song wait (+30s) · /song end (or stop) · /song scores\n"+
-		"Title %d pts, artist %d, first right +%d.", titlePoints, artistPoints, firstBonus)
+		"%s"+
+		"Title %d pts, artist %d, first right +%d.", lobby, titlePoints, artistPoints, firstBonus)
 }
 
 // unknownGenre is the answer to /song with a genre Deezer hasn't, naming
@@ -416,7 +506,7 @@ func decadeNames() string {
 
 // intro is the game's first lines: its genre, its length, and how to
 // answer.
-func intro(g *game, buttons bool) string {
+func intro(g *game) string {
 	title := "🎵 **Song quiz**"
 	if g.Genre != "" {
 		title = "🎵 **Song quiz: " + g.Genre + "**"
@@ -427,15 +517,12 @@ func intro(g *game, buttons bool) string {
 	}
 	join, early := "", "From song 2 on, a song ends as soon as everyone who answered song 1 has answered."
 	if g.Lobby {
-		how := "React to this message with any emoji to join"
-		if buttons { // reactions still count, unmentioned
-			how = "Press ✋ Ready to join"
-		}
-		join = "👋 **" + how + "**, whoever started it too: the game starts 30 seconds after the last player joins, once at least 2 have.\n"
-		if buttons {
-			join += "Whoever started it can begin now with ▶️ Start (or /song start), wait 30s longer with ⏱ +30s (/song wait), or call it off with ✖️ Cancel (/song stop).\n"
+		if g.Buttons { // reactions still count, unmentioned; no countdown
+			join = "👋 **Press ✋ Ready to join**, whoever started it too.\n" +
+				"Whoever started it presses ▶️ Start once everyone's in (at least 2 players), can change the number of songs and the clip length with the buttons, or call it off with ✖️ Cancel (/song stop).\n"
 		} else {
-			join += "Whoever started it can begin now with /song start, wait 30s longer with /song wait, or call it off with /song stop.\n"
+			join = "👋 **React to this message with any emoji to join**, whoever started it too: the game starts 30 seconds after the last player joins, once at least 2 have.\n" +
+				"Whoever started it can begin now with /song start, wait 30s longer with /song wait, or call it off with /song stop.\n"
 		}
 		early = "A song ends as soon as everyone who joined has answered."
 	}
@@ -860,6 +947,7 @@ func (s *server) reacted(c *addon.Context, removed bool) addon.Result {
 		return addon.Text("Noted.")
 	}
 	s.armLobby(g)
+	s.showLobby(g)
 	s.mu.Unlock()
 	s.save()
 	return addon.Text("Noted.")
@@ -879,10 +967,12 @@ func (s *server) joinLocked(g *game, u string, now time.Time) bool {
 }
 
 // armLobby sets g's lobby timer: with enough players, to start lobbyWait
-// after the last join; else to call the game off at CallOff. s.mu is held.
+// after the last join; else to call the game off at CallOff. A lobby with
+// buttons has no countdown: only ▶️ Start or /song start starts it, and
+// it is called off at CallOff whoever joined. s.mu is held.
 func (s *server) armLobby(g *game) {
 	at := g.CallOff
-	if len(g.Joined) >= minPlayers {
+	if len(g.Joined) >= minPlayers && !g.Buttons {
 		at = startAt(g)
 	}
 	chat, id := g.Chat, g.ID
@@ -898,10 +988,12 @@ func (s *server) armLobby(g *game) {
 		}
 		now := s.clock.Now()
 		switch {
-		case len(g.Joined) >= minPlayers && !now.Before(startAt(g)):
+		case len(g.Joined) >= minPlayers && !g.Buttons && !now.Before(startAt(g)):
 			s.beginLocked(g, now)
 		case len(g.Joined) < minPlayers && !now.Before(g.CallOff):
 			s.callOffLocked(g, "Not enough players joined, so the song quiz is off.")
+		case g.Buttons && !now.Before(g.CallOff):
+			s.callOffLocked(g, noStartText)
 		default:
 			s.armLobby(g)
 		}
@@ -943,9 +1035,10 @@ func (s *server) beginLocked(g *game, now time.Time) {
 	s.tryPost(g)
 }
 
-// lobbyAction is anyone's ✋ Ready, or the starter's ▶️ Start, ✖️ Cancel
-// or ⏱ +30s, pressed under the lobby of the game id, or, with id "", /song start or /song
-// wait typed in its chat. It answers with the press's pop-up, or the
+// lobbyAction is anyone's ✋ Ready, or the starter's toggles (t1, t2),
+// ▶️ Start or ✖️ Cancel, pressed under the lobby of the game id, or an
+// older lobby's ⏱ +30s (wait); or, with id "", /song start or /song wait
+// typed in its chat. It answers with the press's pop-up, or the
 // command's reply. It does its work in memory, posting through the outbox,
 // so a press answers well within the bot's 5 seconds.
 func (s *server) lobbyAction(c *addon.Context, action, id string) string {
@@ -977,12 +1070,25 @@ func (s *server) lobbyAction(c *addon.Context, action, id string) string {
 			return alreadyIn
 		}
 		s.armLobby(g)
+		s.showLobby(g)
 		text = fmt.Sprintf("You're in: %d joined.", len(g.Joined))
+	case "t1", "t2":
+		if !g.Buttons {
+			s.mu.Unlock()
+			return ""
+		}
+		text = s.toggleLocked(g, action)
 	case "start": // the starter's press is their join
-		s.joinLocked(g, c.Sender, now)
+		joined := s.joinLocked(g, c.Sender, now)
 		if len(g.Joined) < minPlayers {
 			s.armLobby(g)
 			text = needPlayers
+			if g.Buttons {
+				text = needReady
+			}
+			if joined {
+				s.showLobby(g)
+			}
 			break
 		}
 		s.beginLocked(g, now)
@@ -991,6 +1097,10 @@ func (s *server) lobbyAction(c *addon.Context, action, id string) string {
 		s.callOffLocked(g, lobbyOff)
 		text = cancelled
 	case "wait":
+		if g.Buttons {
+			s.mu.Unlock()
+			return noCountdown
+		}
 		// The earliest it could start: lobbyWait after the last join, or,
 		// short of players, after one joining now.
 		base := now.Add(lobbyWait)

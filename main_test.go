@@ -1148,7 +1148,7 @@ func TestArgs(t *testing.T) {
 		"11":        badCount,
 		"0":         badCount,
 		"rock 20":   badCount,
-		"30s":       badClip,
+		"31s":       badClip,
 		"0s":        badClip,
 		"rock 2.5s": badClip,
 		"polka":     "I don't know that genre. Try one of: pop, rock, rap/hip hop, r&b, games, or /song genres for them all.",
@@ -2152,20 +2152,68 @@ func songPosts(ops []outboxOp) int {
 	return n
 }
 
-// The lobby has the starter's three buttons, in one row, only in a group
-// and only where the bot shows buttons.
+// lobbyRow is the lobby's one row of buttons for the game id with n
+// joined, its songs and clip length, and ▶️ Start once 2 have joined.
+func lobbyRow(id string, n, songs int, clip string) [][]addon.Button {
+	row := []addon.Button{
+		{Label: fmt.Sprintf("✋ Ready: %d", n), Data: "ready:" + id},
+		{Label: fmt.Sprintf("Songs: %d", songs), Data: "t1:" + id},
+		{Label: "Clip length: " + clip, Data: "t2:" + id},
+	}
+	if n >= 2 {
+		row = append(row, addon.Button{Label: "▶️ Start", Data: "start:" + id})
+	}
+	return [][]addon.Button{append(row, addon.Button{Label: "✖️ Cancel", Data: "cancel:" + id})}
+}
+
+// buttonsOps are the buttons ops in the outbox after cursor, checked to be
+// for the lobby id in chat, and the cursor after them.
+func (c *client) buttonsOps(cursor, id string) ([][][]addon.Button, string) {
+	c.t.Helper()
+	page := c.outbox(cursor)
+	var rows [][][]addon.Button
+	for _, op := range page.Ops {
+		if op.Op != "buttons" {
+			continue
+		}
+		if op.Chat != chat || op.Watch != id || op.Text != "" {
+			c.t.Errorf("buttons op %+v", op)
+		}
+		rows = append(rows, op.Buttons)
+	}
+	return rows, page.Cursor
+}
+
+// The lobby's buttons are one row: ✋ Ready with none joined, the
+// toggles and ✖️ Cancel, no ▶️ Start; only in a group and only where the
+// bot shows buttons. Its intro never says to react.
 func TestLobbyButtons(t *testing.T) {
 	clk, c, _, _, r := buttonLobby(t, false)
 	id := r.Meta.Watch.ID
-	want := [][]addon.Button{
-		{{Label: "✋ Ready", Data: "ready:" + id}},
-		{{Label: "▶️ Start", Data: "start:" + id}, {Label: "✖️ Cancel", Data: "cancel:" + id}, {Label: "⏱ +30s", Data: "wait:" + id}},
-	}
-	if !reflect.DeepEqual(r.Meta.Buttons, want) || r.Meta.OnPress != "song_press" {
+	if want := lobbyRow(id, 0, 2, "5s"); !reflect.DeepEqual(r.Meta.Buttons, want) || r.Meta.OnPress != "song_press" {
 		t.Fatalf("buttons %+v, onPress %q", r.Meta.Buttons, r.Meta.OnPress)
 	}
-	if w := words(r); !strings.Contains(w, "▶️ Start (or /song start)") || !strings.Contains(w, "Press ✋ Ready to join") || strings.Contains(w, "React to this message") || !r.Meta.Watch.Reactions {
-		t.Errorf("intro %q", w)
+	if len(r.Meta.Buttons) != 1 || len(r.Meta.Buttons[0]) > 5 {
+		t.Errorf("rows %+v", r.Meta.Buttons)
+	}
+	w := words(r)
+	for _, want := range []string{"Press ✋ Ready to join", "presses ▶️ Start once everyone's in", "change the number of songs and the clip length with the buttons", "✖️ Cancel (/song stop)"} {
+		if !strings.Contains(w, want) {
+			t.Errorf("intro without %q: %q", want, w)
+		}
+	}
+	for _, not := range []string{"React", "react", "+30s", "/song wait", "30 seconds after"} {
+		if strings.Contains(w, not) {
+			t.Errorf("intro with %q: %q", not, w)
+		}
+	}
+	if !r.Meta.Watch.Reactions {
+		t.Error("no reactions")
+	}
+	// The watch covers double the songs, chosen again at the lobby's end.
+	want := clk.Now().Add(lobbyMax + prepMax + 4*(30*time.Second+settle) + fetchSlack + watchSlack).Format(time.RFC3339)
+	if r.Meta.Watch.Until != want {
+		t.Errorf("until %s, want %s", r.Meta.Watch.Until, want)
 	}
 	dm := from(clk, "c_dm", alice)
 	dm.Group = false
@@ -2179,7 +2227,7 @@ func TestLobbyButtons(t *testing.T) {
 	c2.initializeWith(true, true)
 	r2 := c2.song("2", from(clk2, chat, alice))
 	c2.ready()
-	if r2.Meta == nil || r2.Meta.Buttons != nil || r2.Meta.OnPress != "" || !strings.Contains(words(r2), "begin now with /song start") ||
+	if r2.Meta == nil || r2.Meta.Buttons != nil || r2.Meta.OnPress != "" || !strings.Contains(words(r2), "begin now with /song start, wait 30s longer with /song wait") ||
 		!strings.Contains(words(r2), "React to this message with any emoji to join") || strings.Contains(words(r2), "Ready") {
 		t.Errorf("buttons without the capability: %+v %q", r2.Meta, words(r2))
 	}
@@ -2193,15 +2241,19 @@ func (c *client) joined() []string {
 	return slices.Clone(c.s.games[chat].Joined)
 }
 
-// ✋ Ready: anyone's, the starter's too; each press is a join of its own,
-// as a reaction is, saved; twice is already in; 30s after the last, with
-// 2, the game starts with them; after it, and under an older lobby, a
-// press answers as the other buttons do.
+// ✋ Ready: anyone's, the starter's too; each join, by a press or a
+// reaction, and each leave, replaces the row with the new count, ▶️ Start
+// in it from 2; no countdown starts the game; under an older lobby, after
+// the start and after the end, a press answers as the other buttons do.
 func TestPressReady(t *testing.T) {
 	clk, c, _, _, r := buttonLobby(t, false)
 	id := r.Meta.Watch.ID
 	if got := c.press("ready:"+id, from(clk, chat, bob)); got != "You're in: 1 joined." {
 		t.Errorf("bob's press: %q", got)
+	}
+	rows, cur := c.buttonsOps("0", id)
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2, "5s")) {
+		t.Fatalf("after bob: %+v", rows)
 	}
 	if got := c.press("ready:"+id, from(clk, chat, bob)); got != alreadyIn {
 		t.Errorf("bob again: %q", got)
@@ -2213,9 +2265,16 @@ func TestPressReady(t *testing.T) {
 	if got := c.press("ready:sother", from(clk, chat, alice)); got != gameOver {
 		t.Errorf("an older lobby's press: %q", got)
 	}
+	if rows, _ := c.buttonsOps(cur, id); len(rows) != 0 {
+		t.Errorf("ops without a change: %+v", rows)
+	}
 	clk.Advance(10 * time.Second)
 	if got := c.press("ready:"+id, from(clk, chat, alice)); got != "You're in: 2 joined." {
 		t.Errorf("alice's press: %q", got)
+	}
+	rows, cur = c.buttonsOps(cur, id)
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 2, 2, "5s")) || len(rows[0]) != 1 {
+		t.Fatalf("after alice: %+v", rows)
 	}
 	c.s.mu.Lock()
 	data, _ := json.Marshal(c.s.games[chat])
@@ -2223,18 +2282,30 @@ func TestPressReady(t *testing.T) {
 	if !strings.Contains(string(data), `"joined":["`+bob+`","`+alice+`"]`) {
 		t.Errorf("not saved: %s", data)
 	}
-	clk.Advance(lobbyWait - time.Second) // 30s after alice's, not bob's
-	if p := c.outbox("0"); len(p.Ops) != 0 {
-		t.Fatalf("started early: %+v", p)
+	clk.Advance(lobbyMax - 11*time.Second) // no countdown
+	if p := c.outbox(cur); songPosts(p.Ops) != 0 || len(p.Ops) != 0 {
+		t.Fatalf("started by itself: %+v", p)
 	}
-	clk.Advance(time.Second)
-	page := c.outbox("0")
+	c.react(true, from(clk, chat, bob)) // bob leaves: no ▶️ Start
+	rows, cur = c.buttonsOps(cur, id)
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2, "5s")) {
+		t.Fatalf("after bob left: %+v", rows)
+	}
+	c.react(false, from(clk, chat, bob))
+	rows, cur = c.buttonsOps(cur, id)
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 2, 2, "5s")) {
+		t.Fatalf("after bob's reaction: %+v", rows)
+	}
+	if got := c.press("start:"+id, from(clk, chat, alice)); got != startingNow {
+		t.Fatalf("start: %q", got)
+	}
+	page := c.outbox(cur)
 	if len(page.Ops) != 1 {
 		t.Fatalf("ops %+v", page)
 	}
 	checkSong(t, page.Ops[0], 1, 2)
 	c.s.mu.Lock()
-	if g := c.s.games[chat]; g.Lobby || !slices.Equal(g.Players, []string{bob, alice}) {
+	if g := c.s.games[chat]; g.Lobby || !slices.Equal(g.Players, []string{alice, bob}) {
 		t.Errorf("game %+v", g)
 	}
 	c.s.mu.Unlock()
@@ -2242,13 +2313,208 @@ func TestPressReady(t *testing.T) {
 		t.Errorf("after the start: %q", got)
 	}
 	c.song("end", from(clk, chat, alice))
-	if got := c.press("ready:"+id, from(clk, chat, "u_carol")); got != gameOver {
-		t.Errorf("after the end: %q", got)
+	for _, data := range []string{"ready:", "wait:", "t1:"} {
+		if got := c.press(data+id, from(clk, chat, "u_carol")); got != gameOver {
+			t.Errorf("%s after the end: %q", data, got)
+		}
 	}
 }
 
-// ✋ Ready presses racing the lobby's timer and ▶️ Start start the game
-// once, with every join made before it among its players.
+// A lobby with buttons is called off lobbyMax after it opened, whoever
+// joined: with too few, as without buttons; with enough, as nobody
+// pressed ▶️ Start.
+func TestButtonLobbyCallOff(t *testing.T) {
+	for _, tc := range []struct {
+		joined []string
+		why    string
+	}{
+		{[]string{bob}, "Not enough players joined, so the song quiz is off."},
+		{[]string{bob, alice}, noStartText},
+	} {
+		clk, c, _, _, r := buttonLobby(t, false)
+		id := r.Meta.Watch.ID
+		for _, u := range tc.joined {
+			c.press("ready:"+id, from(clk, chat, u))
+		}
+		_, cur := c.buttonsOps("0", id)
+		clk.Advance(lobbyMax - time.Second)
+		if p := c.outbox(cur); len(p.Ops) != 0 {
+			t.Fatalf("ops %+v", p)
+		}
+		clk.Advance(time.Second)
+		p := c.outbox(cur)
+		if len(p.Ops) != 2 || p.Ops[0].Text != tc.why || p.Ops[1].Op != "unwatch" || p.Ops[1].Watch != id {
+			t.Fatalf("%v: ops %+v", tc.joined, p)
+		}
+		c.s.mu.Lock()
+		if c.s.games[chat] != nil {
+			t.Error("the game goes on")
+		}
+		c.s.mu.Unlock()
+		c.close()
+	}
+}
+
+// game is chat's game, copied.
+func (c *client) game() game {
+	c.t.Helper()
+	c.s.mu.Lock()
+	defer c.s.mu.Unlock()
+	g := c.s.games[chat]
+	if g == nil {
+		c.t.Fatal("no game")
+	}
+	return *g
+}
+
+// clipLen is how long an MP3 clip plays.
+func clipLen(t *testing.T, data string) time.Duration {
+	t.Helper()
+	b, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total time.Duration
+	for _, f := range frames(b) {
+		total += f.dur
+	}
+	return total
+}
+
+// The toggles: the starter's only; each flips between what the lobby
+// opened with and double it, replacing the row and saving; songs chosen
+// for fewer, or for another clip length, are chosen again; the game that
+// starts plays what they show.
+func TestPressToggles(t *testing.T) {
+	clk, c, _, _, r := buttonLobby(t, false)
+	id := r.Meta.Watch.ID
+	for _, data := range []string{"t1:", "t2:"} {
+		if got := c.press(data+id, from(clk, chat, bob)); got != notStarter {
+			t.Errorf("bob's %s: %q", data, got)
+		}
+	}
+	if rows, _ := c.buttonsOps("0", id); len(rows) != 0 {
+		t.Errorf("ops after bob's: %+v", rows)
+	}
+	if got := c.press("t1:"+id, from(clk, chat, alice)); got != "Songs: 4" {
+		t.Errorf("t1: %q", got)
+	}
+	c.ready()
+	if g := c.game(); g.Asked != 4 || g.Count != 4 || g.Gathered != 4 || g.Preparing {
+		t.Errorf("4 songs: %+v", g)
+	}
+	if got := c.press("t1:"+id, from(clk, chat, alice)); got != "Songs: 2" {
+		t.Errorf("t1 back: %q", got)
+	}
+	if g := c.game(); g.Asked != 2 || g.Count != 2 || g.Gathered != 4 || g.Preparing { // the 4 chosen do
+		t.Errorf("back to 2: %+v", g)
+	}
+	if got := c.press("t1:"+id, from(clk, chat, alice)); got != "Songs: 4" {
+		t.Errorf("t1 again: %q", got)
+	}
+	if g := c.game(); g.Count != 4 || g.Preparing {
+		t.Errorf("4 again: %+v", g)
+	}
+	if got := c.press("t2:"+id, from(clk, chat, alice)); got != "Clip length: 10s" {
+		t.Errorf("t2: %q", got)
+	}
+	c.ready()
+	if g := c.game(); g.Clip != 10*time.Second || g.GatheredClip != 10*time.Second || g.Preparing {
+		t.Errorf("10s: %+v", g)
+	}
+	rows, cur := c.buttonsOps("0", id)
+	want := [][][]addon.Button{lobbyRow(id, 0, 4, "5s"), lobbyRow(id, 0, 2, "5s"), lobbyRow(id, 0, 4, "5s"), lobbyRow(id, 0, 4, "10s")}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("rows %+v", rows)
+	}
+	c.s.mu.Lock()
+	data, _ := json.Marshal(c.s.games[chat])
+	c.s.mu.Unlock()
+	if !strings.Contains(string(data), `"asked":4`) || !strings.Contains(string(data), `"clip":10000000000`) {
+		t.Errorf("not saved: %s", data)
+	}
+	c.press("ready:"+id, from(clk, chat, bob))
+	if got := c.press("start:"+id, from(clk, chat, alice)); got != startingNow {
+		t.Fatalf("start: %q", got)
+	}
+	page := c.outbox(cur)
+	var song *outboxOp
+	for i := range page.Ops {
+		if page.Ops[i].Audio != nil {
+			song = &page.Ops[i]
+		}
+	}
+	if song == nil || song.Text != songText(&game{Count: 4}) {
+		t.Fatalf("ops %+v", page)
+	}
+	if d := clipLen(t, song.Audio.Data); d < 10*time.Second || d > 10*time.Second+30*time.Millisecond {
+		t.Errorf("a clip of %s", d)
+	}
+}
+
+// A toggle stops at the game's limit: double, or the limit if less; at the
+// limit already, it has one mode, and a press changes nothing.
+func TestPressTogglesCap(t *testing.T) {
+	for _, tc := range []struct {
+		args       string
+		t1, t2     string // the pop-ups
+		songs, max int
+	}{
+		{"8 20s", "Songs: 10", "Clip length: 30s", 8, maxSongs},
+		{"10 30s", atMost, atMost, 10, 10},
+	} {
+		clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+		d := newFakeDeezer(t)
+		c := connect(t, testServer(t, t.TempDir(), clk, &syncBuffer{}, d.srv.URL))
+		c.initializeButtons()
+		r := c.song(tc.args, from(clk, chat, alice))
+		c.ready()
+		id := r.Meta.Watch.ID
+		if got := c.press("t1:"+id, from(clk, chat, alice)); got != tc.t1 {
+			t.Errorf("%s: t1 %q", tc.args, got)
+		}
+		if got := c.press("t2:"+id, from(clk, chat, alice)); got != tc.t2 {
+			t.Errorf("%s: t2 %q", tc.args, got)
+		}
+		c.ready()
+		g := c.game()
+		if g.Asked != tc.max || g.Clip != maxClip {
+			t.Errorf("%s: %d songs, %s clips", tc.args, g.Asked, g.Clip)
+		}
+		rows, _ := c.buttonsOps("0", id)
+		if tc.t1 == atMost && len(rows) != 0 {
+			t.Errorf("%s: ops %+v", tc.args, rows)
+		}
+		c.press("t1:"+id, from(clk, chat, alice))
+		if g := c.game(); g.Asked != tc.songs {
+			t.Errorf("%s: back to %d songs", tc.args, g.Asked)
+		}
+		c.ready()
+		c.close()
+	}
+}
+
+// A toggle while the songs are still chosen chooses them again, for what
+// it shows; the choosing it stopped changes nothing.
+func TestPressTogglePreparing(t *testing.T) {
+	clk, c, d, logs, r := buttonLobby(t, true)
+	id := r.Meta.Watch.ID
+	d.asked(t)
+	if got := c.press("t1:"+id, from(clk, chat, alice)); got != "Songs: 4" {
+		t.Fatalf("t1: %q", got)
+	}
+	d.release()
+	c.ready()
+	if g := c.game(); g.Preparing || g.Count != 4 || g.Gathered != 4 || len(g.Songs) != 1 {
+		t.Errorf("game %+v", g)
+	}
+	if strings.Contains(logs.String(), "no songs") {
+		t.Errorf("called off: %s", logs)
+	}
+}
+
+// ✋ Ready presses racing ▶️ Start start the game once, with every join
+// made before it among its players.
 func TestPressReadyRaces(t *testing.T) {
 	for range 20 {
 		clk, c, _, logs, r := buttonLobby(t, false)
@@ -2256,8 +2522,7 @@ func TestPressReadyRaces(t *testing.T) {
 		c.press("ready:"+id, from(clk, chat, alice))
 		c.press("ready:"+id, from(clk, chat, bob))
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); clk.Advance(lobbyWait) }()
+		wg.Add(1)
 		go func() { defer wg.Done(); c.press("start:"+id, from(clk, chat, alice)) }()
 		got := c.press("ready:"+id, from(clk, chat, "u_carol"))
 		wg.Wait()
@@ -2289,27 +2554,26 @@ func TestPressStart(t *testing.T) {
 	if got := c.press("start:"+id, from(clk, chat, bob)); got != notStarter {
 		t.Errorf("bob's press: %q", got)
 	}
-	if got := c.press("start:"+id, from(clk, chat, alice)); got != needPlayers {
+	if got := c.press("start:"+id, from(clk, chat, alice)); got != needReady {
 		t.Errorf("alone: %q", got)
 	}
-	c.s.mu.Lock()
-	joined := slices.Clone(c.s.games[chat].Joined)
-	c.s.mu.Unlock()
-	if !slices.Equal(joined, []string{alice}) {
-		t.Errorf("joined %v", joined)
+	if got := c.joined(); !slices.Equal(got, []string{alice}) {
+		t.Errorf("joined %v", got)
 	}
-	if p := c.outbox("0"); len(p.Ops) != 0 {
-		t.Fatalf("started alone: %+v", p)
+	rows, cur := c.buttonsOps("0", id)
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2, "5s")) {
+		t.Fatalf("after alice's start: %+v", rows)
 	}
 	if got := c.press("start:sother", from(clk, chat, alice)); got != gameOver {
 		t.Errorf("an older lobby's press: %q", got)
 	}
 	c.react(false, from(clk, chat, bob))
+	_, cur = c.buttonsOps(cur, id)
 	clk.Advance(5 * time.Second)
 	if got := c.press("start:"+id, from(clk, chat, alice)); got != startingNow {
 		t.Errorf("with 2: %q", got)
 	}
-	page := c.outbox("0")
+	page := c.outbox(cur)
 	if len(page.Ops) != 1 {
 		t.Fatalf("ops %+v", page)
 	}
@@ -2319,7 +2583,7 @@ func TestPressStart(t *testing.T) {
 		t.Errorf("game %+v", g)
 	}
 	c.s.mu.Unlock()
-	for _, data := range []string{"start:", "cancel:", "wait:"} {
+	for _, data := range []string{"start:", "cancel:", "wait:", "t1:", "t2:"} {
 		if got := c.press(data+id, from(clk, chat, alice)); got != alreadyBegun {
 			t.Errorf("%s after the start: %q", data, got)
 		}
@@ -2334,6 +2598,33 @@ func TestPressStart(t *testing.T) {
 	}
 }
 
+// Typed, /song start does what ▶️ Start does, in the buttons' words; /song
+// wait says there's no countdown.
+func TestTypedButtonLobby(t *testing.T) {
+	clk, c, _, _, r := buttonLobby(t, false)
+	id := r.Meta.Watch.ID
+	if got := words(c.song("start", from(clk, chat, alice))); got != needReady {
+		t.Errorf("alone: %q", got)
+	}
+	if got := words(c.song("wait", from(clk, chat, alice))); got != noCountdown {
+		t.Errorf("wait: %q", got)
+	}
+	if got := c.press("wait:"+id, from(clk, chat, alice)); got != noCountdown {
+		t.Errorf("an old lobby's wait: %q", got)
+	}
+	c.press("ready:"+id, from(clk, chat, bob))
+	rows, cur := c.buttonsOps("0", id)
+	if !reflect.DeepEqual(rows, [][][]addon.Button{lobbyRow(id, 1, 2, "5s"), lobbyRow(id, 2, 2, "5s")}) {
+		t.Errorf("rows %+v", rows)
+	}
+	if got := words(c.song("start", from(clk, chat, alice))); got != startingNow {
+		t.Errorf("start: %q", got)
+	}
+	if p := c.outbox(cur); songPosts(p.Ops) != 1 {
+		t.Fatalf("ops %+v", p)
+	}
+}
+
 // ▶️ Start while the songs are still chosen starts the game as the timer
 // would: a post says they are being made ready.
 func TestPressStartPreparing(t *testing.T) {
@@ -2341,10 +2632,11 @@ func TestPressStartPreparing(t *testing.T) {
 	d.asked(t)
 	c.react(false, from(clk, chat, alice))
 	c.react(false, from(clk, chat, bob))
+	_, cur := c.buttonsOps("0", r.Meta.Watch.ID)
 	if got := c.press("start:"+r.Meta.Watch.ID, from(clk, chat, alice)); got != startingNow {
 		t.Fatalf("press %q", got)
 	}
-	page := c.outbox("0")
+	page := c.outbox(cur)
 	if len(page.Ops) != 1 || page.Ops[0].Text != gettingReady {
 		t.Fatalf("ops %+v", page)
 	}
@@ -2386,10 +2678,24 @@ func TestPressCancel(t *testing.T) {
 	}
 }
 
-// ⏱ +30s: the starter's only; each press adds 30s, which later joins keep;
-// never past the call-off; it is saved.
+// signalLobby is a server whose bot shows no buttons, with a lobby opened
+// by alice in chat, its songs chosen; it returns the intro too.
+func signalLobby(t *testing.T) (*fakeClock, *client, toolResult) {
+	t.Helper()
+	clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+	d := newFakeDeezer(t)
+	c := connect(t, testServer(t, t.TempDir(), clk, &syncBuffer{}, d.srv.URL))
+	c.initializeWith(true, true)
+	r := c.song("2", from(clk, chat, alice))
+	c.ready()
+	return clk, c, r
+}
+
+// Without buttons, /song wait (or an older lobby's ⏱ +30s): the starter's
+// only; each adds 30s, which later joins keep; never past the call-off;
+// it is saved.
 func TestPressWait(t *testing.T) {
-	clk, c, _, _, r := buttonLobby(t, false)
+	clk, c, r := signalLobby(t)
 	id := r.Meta.Watch.ID
 	if got := c.press("wait:"+id, from(clk, chat, bob)); got != notStarter {
 		t.Errorf("bob's press: %q", got)
@@ -2399,8 +2705,8 @@ func TestPressWait(t *testing.T) {
 	if got := c.press("wait:"+id, from(clk, chat, alice)); got != waitLonger {
 		t.Errorf("press %q", got)
 	}
-	if got := c.press("wait:"+id, from(clk, chat, alice)); got != waitLonger {
-		t.Errorf("press %q", got)
+	if got := words(c.song("wait", from(clk, chat, alice))); got != waitLonger {
+		t.Errorf("typed %q", got)
 	}
 	clk.Advance(lobbyWait + 50*time.Second)
 	c.react(false, from(clk, chat, "u_carol")) // a later join keeps the extra minute
@@ -2420,23 +2726,22 @@ func TestPressWait(t *testing.T) {
 	}
 }
 
-// ⏱ +30s stops at the lobby's call-off.
+// /song wait stops at the lobby's call-off.
 func TestPressWaitCap(t *testing.T) {
-	clk, c, _, _, r := buttonLobby(t, false)
-	id := r.Meta.Watch.ID
+	clk, c, _ := signalLobby(t)
 	start := clk.Now()
 	c.react(false, from(clk, chat, alice))
 	c.react(false, from(clk, chat, bob))
 	got, n := "", 0
 	for ; n < 100; n++ {
-		if got = c.press("wait:"+id, from(clk, chat, alice)); got != waitLonger {
+		if got = words(c.song("wait", from(clk, chat, alice))); got != waitLonger {
 			break
 		}
 	}
 	if got != noLonger || n != int((lobbyMax-lobbyWait)/waitStep) {
-		t.Fatalf("after %d presses: %q", n, got)
+		t.Fatalf("after %d: %q", n, got)
 	}
-	if got := c.press("wait:"+id, from(clk, chat, alice)); got != noLonger {
+	if got := words(c.song("wait", from(clk, chat, alice))); got != noLonger {
 		t.Errorf("again: %q", got)
 	}
 	c.s.mu.Lock()
@@ -2509,40 +2814,42 @@ func TestTypedLobby(t *testing.T) {
 	}
 }
 
-// A press and the lobby's timer at once start the game once.
+// Without buttons, /song start and the lobby's timer at once start the
+// game once.
 func TestPressRacesTimer(t *testing.T) {
 	for range 20 {
-		clk, c, _, logs, r := buttonLobby(t, false)
+		clk, c, _ := signalLobby(t)
 		c.react(false, from(clk, chat, alice))
 		c.react(false, from(clk, chat, bob))
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() { defer wg.Done(); clk.Advance(lobbyWait) }()
-		got := c.press("start:"+r.Meta.Watch.ID, from(clk, chat, alice))
+		got := words(c.song("start", from(clk, chat, alice)))
 		wg.Wait()
 		if got != startingNow && got != alreadyBegun {
-			t.Errorf("press %q", got)
+			t.Errorf("start %q", got)
 		}
 		if p := c.outbox("0"); songPosts(p.Ops) != 1 {
 			t.Fatalf("song posts %+v", p)
-		}
-		if n := strings.Count(logs.String(), "began:"); n != 1 {
-			t.Fatalf("began %d times", n)
 		}
 		c.close()
 	}
 }
 
-// /song in the lobby says the game is waiting for players, not on a song.
+// /song in the lobby says the game is waiting for players, not on a song,
+// in the words of the network: press ✋ Ready, or react.
 func TestLobbyBusy(t *testing.T) {
-	clk, c, _, _, _ := buttonLobby(t, false)
-	if got := words(c.song("", from(clk, chat, bob))); got != lobbyBusyText {
+	clk, c, _, _, r := buttonLobby(t, false)
+	if got := words(c.song("", from(clk, chat, bob))); got != readyBusyText || strings.Contains(got, "react") {
 		t.Errorf("in the lobby: %q", got)
 	}
-	c.react(false, from(clk, chat, alice))
-	c.react(false, from(clk, chat, bob))
-	clk.Advance(lobbyWait)
+	c.press("ready:"+r.Meta.Watch.ID, from(clk, chat, bob))
+	c.press("start:"+r.Meta.Watch.ID, from(clk, chat, alice))
 	if got := words(c.song("", from(clk, chat, bob))); got != "A song quiz is on: song 1 of 2." {
 		t.Errorf("after it: %q", got)
+	}
+	clk2, c2, _ := signalLobby(t)
+	if got := words(c2.song("", from(clk2, chat, bob))); got != lobbyBusyText {
+		t.Errorf("without buttons: %q", got)
 	}
 }

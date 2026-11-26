@@ -30,7 +30,9 @@ music, and holds no API key: Deezer's public API needs none.
   left out.
 - **Joining.** A press of ✋ Ready and a reaction are the same join, each
   player's own, saved alike. Taking a reaction back leaves the lobby,
-  however you joined. Those who
+  however you joined. Where the lobby has buttons, each join or leave
+  replaces its row (a `buttons` op), with the new count in ✋ Ready and
+  ▶️ Start from 2 players. Those who
   joined are the players every song waits for; anyone may still answer.
   On Telegram the bot sees reactions only as the group's admin.
 - **Answering.** In a group, a reply to any of the game's messages counts
@@ -230,7 +232,24 @@ their cancellation, and the outbox the bot reads. The game adds:
   last, the results follow as a new post, then an `unwatch`. `/song end`
   (or `stop`) answers with the open song's reveal and the results itself
   and queues only the `unwatch`; in the lobby it calls the game off. A
-  lobby called off for want of players posts why, then an `unwatch`.
+  lobby called off for want of players (or, with buttons, unstarted after
+  15 minutes) posts why, then an `unwatch`.
+- Where the bot offers `buttons`, the lobby's answer has one row,
+  `onPress: "song_press"`: `✋ Ready: N` (`ready:<id>`, anyone's),
+  `Songs: N` (`t1:<id>`), `Clip length: Ns` (`t2:<id>`), `▶️ Start`
+  (`start:<id>`, shown from 2 players) and `✖️ Cancel` (`cancel:<id>`),
+  `<id>` the watch's. The lobby then has no countdown: only ▶️ Start or
+  `/song start` starts it, and `/song wait` (or an older lobby's
+  `wait:<id>`) says there's none. Each toggle switches between the value
+  the lobby opened with and double it, capped at the game's limit (one
+  mode if already there); a toggle saves the game and, if the songs
+  already chosen were chosen for fewer or for another clip length, or are
+  still being chosen, chooses them again in the background. Every change
+  of the players or a toggle queues
+  `{"op": "buttons", "chat": <chat>, "watch": <id>, "buttons": [[…]]}`
+  with the new row (signalbot `f6a3c5c` or newer; elsewhere a no-op). The
+  watch runs long enough for double the songs, chosen again at the
+  lobby's last moment.
 - 5 seconds before a song's deadline, the game queues
   `{"op": "react", "chat": <chat>, "post": <the song's post's op ID>, "emoji": "⏰"}`:
   a reaction to its own post, by the op ID, in place of a context's `ref`.

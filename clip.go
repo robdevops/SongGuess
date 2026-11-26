@@ -10,11 +10,13 @@ import (
 )
 
 // How much of a preview the game plays: by default, and the least and
-// most /song 10s may ask for, within a 30-second preview.
+// most /song 10s may ask for, within a 30-second preview, and how
+// far short of a clip's length a preview played whole may be.
 const (
 	clipLength = 5 * time.Second
 	minClip    = time.Second
-	maxClip    = 25 * time.Second
+	maxClip    = 30 * time.Second
+	clipSlack  = time.Second // how far short of maxClip a whole preview may be
 )
 
 // clipArg reads a clip length such as 10s, from minClip to maxClip, in
@@ -22,7 +24,7 @@ const (
 func clipArg(s string) (time.Duration, error) {
 	d, err := time.ParseDuration(strings.ToLower(s))
 	if err != nil || d < minClip || d > maxClip || d%time.Second != 0 {
-		return 0, fmt.Errorf("%q isn't a clip length: use 1s to 25s, such as /song 10s", s)
+		return 0, fmt.Errorf("%q isn't a clip length: use 1s to 30s, such as /song 10s", s)
 	}
 	return d, nil
 }
@@ -136,19 +138,25 @@ func frames(b []byte) []frame {
 // clip is a random length of audio, an MP3, cut at frame edges and
 // without tags. The first frame of the cut is dropped, as it may lean on
 // audio before it.
+// A preview a little short of the length asked, by at most clipSlack, is
+// played whole, as a 30s clip of a preview of not quite 30s.
 func clip(audio []byte, length time.Duration, r *rand.Rand) ([]byte, error) {
 	b := stripTags(audio)
 	fs := frames(b)
-	n := 0 // frames in a clip
-	var total time.Duration
-	for n < len(fs) && total < length {
-		total += fs[n].dur
-		n++
-	}
-	if total < length || len(fs) < n+1 {
+	if len(fs) < 2 {
 		return nil, errNotMP3
 	}
-	start := 1 + r.IntN(len(fs)-n) // after one frame to drop
-	first, last := fs[start], fs[start+n-1]
+	body := fs[1:] // after one frame to drop
+	n := 0         // frames in a clip
+	var total time.Duration
+	for n < len(body) && total < length {
+		total += body[n].dur
+		n++
+	}
+	if total < length-clipSlack || total < length && n < len(body) {
+		return nil, errNotMP3
+	}
+	start := r.IntN(len(body) - n + 1)
+	first, last := body[start], body[start+n-1]
 	return bytes.Clone(b[first.start : last.start+last.size]), nil
 }
