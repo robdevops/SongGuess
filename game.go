@@ -164,7 +164,7 @@ func (s *server) command(ctx context.Context, c *addon.Context, args string) add
 		case "scores":
 			return addon.Text(s.scoreboard(c.Chat))
 		case "help":
-			return addon.Text(s.helpText())
+			return addon.Text(s.helpText(c.Buttons))
 		case "genre", "genres":
 			return addon.Text(s.genreList(ctx))
 		}
@@ -311,7 +311,7 @@ func (s *server) openLobby(c *addon.Context, src source, n int, length time.Dura
 	g := s.newGame(c, src, n, length, now)
 	// Preparing overlaps the lobby: only what it may take past it counts.
 	g.End = now.Add(max(lobbyMax, prepMax) + s.playTime(n))
-	if s.srv.Buttons() {
+	if c.Buttons {
 		// The starter may double the songs, and have them chosen again,
 		// until the lobby's last moment: the watch covers that too.
 		g.Buttons, g.BaseSongs = true, n
@@ -431,10 +431,11 @@ func (s *server) rechooseLocked(g *game) {
 	s.gatherGame(g)
 }
 
-// helpText is /song help: every command, with the defaults in use.
-func (s *server) helpText() string {
+// helpText is /song help: every command, with the defaults in use; with
+// buttons, for a chat that shows them.
+func (s *server) helpText(buttons bool) string {
 	lobby := "/song start · /song wait (+30s) · /song end (or stop) · /song scores\n"
-	if s.srv.Buttons() {
+	if buttons {
 		lobby = "/song start · /song end (or stop) · /song scores\n"
 	}
 	return fmt.Sprintf("🎵 **Song quiz**: reply to each clip with the title or artist.\n"+

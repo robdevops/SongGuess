@@ -485,6 +485,9 @@ func from(clk clock, chat, user string) callContext {
 // tool calls a tool as the bot does, with the message's context in _meta.
 func (c *client) tool(name string, args map[string]string, ctx callContext) toolResult {
 	c.t.Helper()
+	if ctx.Network == "" { // a bot on one network: its chats show buttons if it does
+		ctx.Buttons = c.s.srv.Buttons()
+	}
 	var r toolResult
 	c.result("tools/call", map[string]any{
 		"name": name, "arguments": args,
@@ -1166,7 +1169,7 @@ func TestArgs(t *testing.T) {
 		"polka":     "I don't know that genre. Try one of: pop, rock, rap/hip hop, r&b, games, or /song genres for them all.",
 		"genres":    "🎵 **Genres:** pop, rock, rap/hip hop, r&b, games.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s, 2020s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
 		"GENRE":     "🎵 **Genres:** pop, rock, rap/hip hop, r&b, games.\n**Decades:** 60s, 70s, 80s, 90s, 2000s, 2010s, 2020s.\nPlay one with, say, /song rock or /song 80s; plain /song plays the main chart.",
-		"help":      c.s.helpText(),
+		"help":      c.s.helpText(false),
 	} {
 		if got := words(c.song(args, from(clk, chat, alice))); got != want {
 			t.Errorf("%q: %q", args, got)
@@ -2942,5 +2945,20 @@ func TestLobbyBusy(t *testing.T) {
 	clk2, c2, _ := signalLobby(t)
 	if got := words(c2.song("", from(clk2, chat, bob))); got != lobbyBusyText {
 		t.Errorf("without buttons: %q", got)
+	}
+}
+
+// On a bot on two networks whose Telegram shows buttons, a Signal group's
+// lobby is one for reactions: its chat shows none.
+func TestNoButtonsChat(t *testing.T) {
+	clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+	d := newFakeDeezer(t)
+	c := connect(t, testServer(t, t.TempDir(), clk, &syncBuffer{}, d.srv.URL))
+	c.initializeButtons()
+	ctx := from(clk, chat, alice)
+	ctx.Network, ctx.Buttons = "signal", false
+	r := c.song("2", ctx)
+	if r.Meta == nil || r.Meta.Buttons != nil || r.Meta.OnPress != "" || !r.Meta.Watch.Reactions || !strings.Contains(words(r), "React to this message") {
+		t.Fatalf("a Signal lobby: %q, %+v", words(r), r.Meta)
 	}
 }
