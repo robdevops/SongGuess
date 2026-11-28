@@ -48,14 +48,17 @@ music, and holds no API key: Deezer's public API needs none.
 - **Answering.** In a group, a reply to any of the game's messages counts
   for the song that is open. That works on every network, and on Telegram
   whatever the bot's privacy mode.
-- **Judging.** When a song ends, the bot's model judges every answer, the
-  title and the artist separately, as a friendly quiz host would:
-  misspellings, "wanna" for "want to", word order and the like are fine; a
-  different song, a list of guesses or unrelated chat isn't. The model
-  needs the addon block's `model` permission; without it, or if it fails, a
-  stricter built-in match decides: case, accents and punctuation don't
-  matter, one or two letters may be wrong, and a long reply listing guesses
-  names nothing.
+- **Judging.** A built-in match marks every answer, the title and the
+  artist separately: case, accents and punctuation don't matter, one or two
+  letters may be wrong, and a long reply listing guesses names nothing.
+  When a song ends, the answers it didn't find fully right (missing the
+  title or the artist) go to the bot's model, which judges them as a
+  friendly quiz host would: misspellings, "wanna" for "want to", word order
+  and the like are fine; a different song, a list of guesses or unrelated
+  chat isn't. The model can only add what the match missed, never take
+  away what it found; if every answer is fully right, it isn't asked. The
+  model needs the addon block's `model` permission; without it, or if it
+  fails, the built-in match's marks stand.
 - **Your last answer before time is up counts.** To change it, edit your
   reply, or reply again; a new reply replaces the old one, so give the title
   and the artist in the same one. Answers get no reaction.
@@ -170,10 +173,11 @@ phone number, account ID, group ID or, unless `names` is set, a display
 name; it writes players as `{u_…}` and the bot puts their names in.
 Replies are claimed by the bot, so they are never answered, sent to the
 model or kept in the chat's history. With the `model` permission, each
-song's answers (what players replied, without their names or pseudonyms),
-its title and its artist go to the bot's model to be judged, one request a
-song; and when a game starts, the titles and artists of the chart's
-tracks, to keep English music, one request. Both are charged to
+song's answers that the built-in match doesn't fully accept (what players
+replied, without their names or pseudonyms), its title and its artist go
+to the bot's model to be judged, at most one request a song; and when a
+game starts, the titles and artists of the chart's tracks, to keep
+English music, one request. Both are charged to
 the chat's daily budget.
 
 Deezer sees the game's requests: the genre asked for, from the bot's

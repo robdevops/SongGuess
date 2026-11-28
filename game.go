@@ -656,16 +656,17 @@ func (s *server) timeUp(chat, id string, current int) {
 		s.mu.Unlock()
 		return
 	}
-	if len(g.Answers) == 0 || !s.srv.CanSample() {
-		s.revealLocked(g) // nothing to judge, or no model: the fuzzy match stands
+	sent := unsure(g)
+	if len(sent) == 0 || !s.srv.CanSample() {
+		s.revealLocked(g) // nothing in doubt, or no model: the fuzzy match stands
 		s.mu.Unlock()
 		s.save()
 		return
 	}
 	g.judging = true
-	req := judgeRequest(g)
+	req := judgeRequest(g, sent)
 	s.mu.Unlock()
-	go s.judge(chat, id, current, req)
+	go s.judge(chat, id, current, sent, req)
 }
 
 // revealLocked marks g's open song and queues its reveal, as a reply to
@@ -1240,7 +1241,8 @@ const (
 	judgeTimeout = 20 * time.Second
 )
 
-// judgeSystem tells the model how to mark the answers.
+// judgeSystem tells the model how to mark the answers it is sent: those
+// the fuzzy match did not find fully right.
 const judgeSystem = `You mark a music quiz. Players heard a clip of a song and replied with its title, its artist, or both.
 For each answer, decide separately whether it names the song's title and whether it names the song's artist.
 Be lenient, as a friendly quiz host would: accept misspellings, phonetic spellings, slang and contractions ("wanna" for "want to"), missing or extra small words, a missing "the", any word order, abbreviations, and either half of a duo or the main artist without featured ones.
@@ -1256,16 +1258,16 @@ type judged struct {
 	Artist bool `json:"artist"`
 }
 
-// judgeRequest asks the model to mark g's open song's answers, numbered
-// in order of when they were sent. s.mu is held.
-func judgeRequest(g *game) addon.SampleRequest {
+// judgeRequest asks the model to mark the answers of sent, players of g's
+// open song, numbered from 1 in that order. s.mu is held.
+func judgeRequest(g *game, sent []string) addon.SampleRequest {
 	t := g.Songs[g.Current]
 	type item struct {
 		ID   int    `json:"id"`
 		Text string `json:"text"`
 	}
 	var items []item
-	for _, u := range answerOrder(g) {
+	for _, u := range sent {
 		items = append(items, item{len(items) + 1, g.Answers[u].Text})
 	}
 	song := map[string]any{"title": cmp.Or(t.Short, t.Title), "artist": t.Artist, "answers": items}
@@ -1287,10 +1289,18 @@ func answerOrder(g *game) []string {
 	return users
 }
 
-// judge asks the model to mark song current of the game id in chat, then
-// reveals it with the model's verdicts, or, if it fails, with the fuzzy
-// match's. Neither the answers nor the verdicts are logged.
-func (s *server) judge(chat, id string, current int, req addon.SampleRequest) {
+// unsure is g's open song's players, in the order they answered, whose
+// answers the fuzzy match did not find fully right: missing the title or
+// the artist. Only these go to the model. s.mu is held.
+func unsure(g *game) []string {
+	return slices.DeleteFunc(answerOrder(g), func(u string) bool { a := g.Answers[u]; return a.Title && a.Artist })
+}
+
+// judge asks the model to mark the answers of sent, players of song
+// current of the game id in chat, then reveals it. The model can only add
+// what the fuzzy match missed, never take away what it found; if it fails,
+// the fuzzy match stands. Neither the answers nor the verdicts are logged.
+func (s *server) judge(chat, id string, current int, sent []string, req addon.SampleRequest) {
 	ctx, cancel := context.WithTimeout(context.Background(), judgeTimeout)
 	defer cancel()
 	res, err := s.srv.Sample(ctx, chat, req)
@@ -1308,14 +1318,16 @@ func (s *server) judge(chat, id string, current int, req addon.SampleRequest) {
 	if err != nil {
 		s.log.Printf("game %s: judging failed, the fuzzy match stands: %v", g.ID, errClass(err))
 	} else {
-		order := answerOrder(g)
 		for _, v := range verdicts {
-			if v.ID < 1 || v.ID > len(order) {
+			if v.ID < 1 || v.ID > len(sent) {
 				continue
 			}
-			u := order[v.ID-1]
-			a := g.Answers[u]
-			a.Title, a.Artist = v.Title, v.Artist
+			u := sent[v.ID-1]
+			a, ok := g.Answers[u]
+			if !ok {
+				continue
+			}
+			a.Title, a.Artist = a.Title || v.Title, a.Artist || v.Artist
 			g.Answers[u] = a
 		}
 	}

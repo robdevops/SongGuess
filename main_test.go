@@ -590,6 +590,7 @@ const (
 	chat  = "c_one"
 	alice = "u_alice"
 	bob   = "u_bob"
+	carol = "u_carol"
 )
 
 // begin is a fake clock, a fake Deezer, a server and a client, with the
@@ -1546,10 +1547,11 @@ func TestDMEndsEarly(t *testing.T) {
 	}
 }
 
-// With the bot's model, the model judges each answer at the reveal: its
-// verdicts replace the fuzzy match's, both ways; the answers it gets are
-// numbered in the order sent; without a usable reply, the fuzzy match
-// stands.
+// With the bot's model, the model judges at the reveal only the answers
+// the fuzzy match did not find fully right, numbered from 1 in the order
+// sent, and can only add to the fuzzy match's marks, never take one away;
+// unknown ids are ignored; a song whose answers are all fully right makes
+// no request; without a usable reply, the fuzzy match stands.
 func TestJudge(t *testing.T) {
 	clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
 	logs := &syncBuffer{}
@@ -1557,7 +1559,7 @@ func TestJudge(t *testing.T) {
 	c := connect(t, testServer(t, t.TempDir(), clk, logs, d.srv.URL))
 	var mu sync.Mutex
 	var asked []string
-	reply := `{"answers":[{"id":1,"title":true,"artist":true},{"id":2,"title":false,"artist":false}]}`
+	reply := `{"answers":[{"id":1,"title":true,"artist":true},{"id":2,"title":false,"artist":true},{"id":3,"title":true,"artist":true}]}`
 	c.judge = func(params json.RawMessage) string {
 		var p sampleRequest
 		json.Unmarshal(params, &p)
@@ -1577,15 +1579,17 @@ func TestJudge(t *testing.T) {
 	c.song("2", dm(alice))
 	waitFor(t, c.s, "song 1", func() bool { g := c.s.games[chat]; return g != nil && g.Post != "" })
 	c.s.mu.Lock()
-	song := c.s.games[chat].Songs[0]
+	songs := slices.Clone(c.s.games[chat].Songs)
 	c.s.mu.Unlock()
-	c.reply("something misspelt", dm(bob))            // the model says right
-	c.reply(song.Title+" by "+song.Artist, dm(alice)) // the fuzzy match says right; the model, wrong
+	song := songs[0]
+	c.reply("something misspelt", dm(bob))            // sent as 1: the model says right
+	c.reply(song.Title+" by "+song.Artist, dm(alice)) // fully right: not sent
+	c.reply(song.Title, dm(carol))                    // sent as 2: the model takes the title away, which stays, and adds the artist
 	clk.Advance(settle)
 	waitFor(t, c.s, "the reveal", func() bool { g := c.s.games[chat]; return g == nil || g.Current == 1 })
 	mu.Lock()
-	if len(asked) != 1 || !strings.Contains(asked[0], `"answers":[{"id":1,"text":"something misspelt"},{"id":2,"text":"`) || strings.Contains(asked[0], `"game"`) {
-		t.Errorf("asked %q", asked)
+	if want := `"answers":[{"id":1,"text":"something misspelt"},{"id":2,"text":` + strconv.Quote(song.Title) + `}]`; len(asked) != 1 || !strings.Contains(asked[0], want) || strings.Contains(asked[0], " by ") || strings.Contains(asked[0], `"game"`) {
+		t.Errorf("asked %q, want %s", asked, want)
 	}
 	mu.Unlock()
 	page := c.outbox("0")
@@ -1595,7 +1599,7 @@ func TestJudge(t *testing.T) {
 			reveal = o.Text
 		}
 	}
-	if !strings.Contains(reveal, "Title: {u_bob} ⚡") || !strings.Contains(reveal, "Artist: {u_bob}") || strings.Contains(reveal, "{u_alice}") || strings.Contains(reveal, "🎮") {
+	if !strings.Contains(reveal, "Title: {u_bob} ⚡, {u_alice}, {u_carol}") || !strings.Contains(reveal, "Artist: {u_bob}, {u_alice}, {u_carol}") || strings.Contains(reveal, "🎮") {
 		t.Errorf("reveal %q", reveal)
 	}
 	for _, secret := range []string{"misspelt", song.Title} {
@@ -1603,11 +1607,36 @@ func TestJudge(t *testing.T) {
 			t.Errorf("the log holds %q", secret)
 		}
 	}
-	if v, err := parseVerdicts("```json\n" + reply + "\n```"); err != nil || len(v) != 2 || !v[0].Artist {
+	// Song 2: every answer is fully right, so the model isn't asked.
+	waitFor(t, c.s, "song 2", func() bool { g := c.s.games[chat]; return g != nil && g.Current == 1 && g.Post != "" })
+	for _, u := range []string{alice, bob, carol} {
+		c.reply(songs[1].Title+" by "+songs[1].Artist, dm(u))
+	}
+	clk.Advance(30*time.Second + settle)
+	waitFor(t, c.s, "the end", func() bool { g := c.s.games[chat]; return g == nil || g.Current >= 2 || g.Post == "" })
+	mu.Lock()
+	if len(asked) != 1 {
+		t.Errorf("song 2 asked the model: %q", asked[1:])
+	}
+	mu.Unlock()
+	if v, err := parseVerdicts("```json\n" + reply + "\n```"); err != nil || len(v) != 3 || !v[0].Artist {
 		t.Errorf("parseVerdicts %v %v", v, err)
 	}
 	if _, err := parseVerdicts("sure!"); err == nil {
 		t.Error("no JSON parsed")
+	}
+}
+
+// unsure leaves out fully right answers, and keeps the order sent.
+func TestUnsure(t *testing.T) {
+	g := &game{Answers: map[string]answer{
+		alice: {Seq: 3, Title: true},
+		bob:   {Seq: 1, Title: true, Artist: true},
+		carol: {Seq: 2},
+		"u_d": {Seq: 4, Artist: true},
+	}}
+	if got := unsure(g); !slices.Equal(got, []string{carol, alice, "u_d"}) {
+		t.Errorf("unsure %v", got)
 	}
 }
 
@@ -1818,7 +1847,7 @@ func TestGameAnswers(t *testing.T) {
 		t.Errorf("titleNames %v", got)
 	}
 	g := &game{Songs: []track{sweden}, Answers: map[string]answer{alice: {Text: "x"}}}
-	if req := judgeRequest(g); strings.Contains(req.Messages[0].Content.Text, `"game"`) {
+	if req := judgeRequest(g, []string{alice}); strings.Contains(req.Messages[0].Content.Text, `"game"`) {
 		t.Errorf("a game in %s", req.Messages[0].Content.Text)
 	}
 	var old track

@@ -79,8 +79,9 @@ You need signalbot at `f6a3c5c` (branch `claude/busy-maxwell-jo5ojy`, or main on
    `songs`. `chats: ["all"]` plays in every group; list group IDs to
    limit it, and add `"dms": true` to play in DMs too. `react` is for
    the ⏰ on each song with 5 seconds left. Keep the `model`
-   permission: the bot's model judges the answers and picks English
-   songs. Without it, a stricter built-in match judges.
+   permission: the bot's model judges the answers a stricter built-in
+   match doesn't accept, and picks English songs. Without it, the built-in
+   match alone judges.
 
    ```jsonc
    "songs": {
@@ -105,7 +106,8 @@ notes are in [docs/DETAILS.md](docs/DETAILS.md#settings-in-full).
 The songs, covers and previews come from Deezer's public API, with thanks
 to [Deezer](https://www.deezer.com). Whether posting clips fits Deezer's
 API terms is for the bot's operator to check. With the `model` permission,
-answers, titles and artists go to the bot's model, without names. The game
+answers the built-in match doesn't fully accept, with their songs' titles
+and artists, go to the bot's model, without names. The game
 never logs names or message text.
 
 More: [docs/DETAILS.md](docs/DETAILS.md)
