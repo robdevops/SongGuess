@@ -230,9 +230,13 @@ func (s *server) english(ctx context.Context, chat string, tracks []track, games
 	if games {
 		prompt = `You know video game music. For each track below, decide whether it is music from a video game: a game's soundtrack, theme or score, or a song made for a game. Music from a film or TV show, or a song merely used in a trailer, is not. Instrumentals are fine; a song with lyrics must be sung mainly in English. For each track that qualifies, name its game as players know it, as short as is still clear (Minecraft, Halo, Final Fantasy VII). Reply with JSON only, no other text: {"english":[{"id":1,"game":"Minecraft"},{"id":3,"game":"Halo"}]}, the tracks that qualify, by id, each with its game.`
 	}
+	tokens := judgeTokens
+	if games { // each kept track's reply names its game, so needs room
+		tokens = max(judgeTokens, 24*len(latin)+100)
+	}
 	res, err := s.srv.Sample(ctx, chat, addon.SampleRequest{
 		SystemPrompt: prompt,
-		MaxTokens:    judgeTokens, Temperature: &zero,
+		MaxTokens:    tokens, Temperature: &zero,
 		Messages: []addon.SampleMessage{{Role: "user", Content: addon.Content{Type: "text", Text: string(body)}}},
 	})
 	if err != nil {
@@ -258,10 +262,14 @@ func (s *server) english(ctx context.Context, chat string, tracks []track, games
 		}
 		switch {
 		case json.Unmarshal(e, &id) == nil: // the reply as it was: ids alone
-			kept[id] = ""
+			if _, ok := kept[id]; !ok {
+				kept[id] = ""
+			}
 		case json.Unmarshal(e, &named) == nil:
-			kept[named.ID] = strings.TrimSpace(named.Game)
-			anyGame = anyGame || kept[named.ID] != ""
+			if game := strings.TrimSpace(named.Game); game != "" || kept[named.ID] == "" { // a repeat doesn't lose a game named
+				kept[named.ID] = game
+				anyGame = anyGame || game != ""
+			}
 		}
 	}
 	if games && len(kept) > 0 && !anyGame { // no game named: they can't be checked

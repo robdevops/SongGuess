@@ -1803,6 +1803,13 @@ func TestGameAnswers(t *testing.T) {
 	if title, artist := mark("minecraft by c418", sweden); !title || !artist {
 		t.Errorf("the game and artist: %v %v", title, artist)
 	}
+	dragonborn := track{Title: "Dragonborn", Artist: "Jeremy Soule", Game: "The Elder Scrolls V: Skyrim"}
+	if title, artist := mark("dragonborn halo zelda mario sonic tetris doom jeremy soule", dragonborn); title || artist {
+		t.Errorf("a list of guesses, with a long game: %v %v", title, artist)
+	}
+	if title, artist := mark("elder scrolls skyrim by jeremy soule", dragonborn); !title || !artist {
+		t.Errorf("a long game and artist: %v %v", title, artist)
+	}
 	sweden.Game = ""
 	if title, _ := mark("minecraft", sweden); title {
 		t.Error("a game without one")
@@ -3122,5 +3129,76 @@ func TestNoButtonsChat(t *testing.T) {
 	r := c.song("2", ctx)
 	if r.Meta == nil || r.Meta.Buttons != nil || r.Meta.OnPress != "" || !r.Meta.Watch.Reactions || !strings.Contains(words(r), "React to this message") {
 		t.Fatalf("a Signal lobby: %q, %+v", words(r), r.Meta)
+	}
+}
+
+// /song games reads the model's reply robustly: a reply of ids alone
+// names no games, so the songs are chosen by script; junk, ids without a
+// game and repeats are passed over; a game's name must be whole words of
+// the title or artist, so a tiny one doesn't match any title.
+func TestGamesReplies(t *testing.T) {
+	for _, tc := range []struct {
+		reply, log string
+		want       []int64
+	}{
+		{`{"english":[<Halo Theme>,<Sweden>,<Minecraft (Main Theme)>,<Song of Storms>]}`, "by script instead: no games named", []int64{301, 302, 303, 304}},
+		{`{"english":["x",{"id":<Halo Theme>,"game":"Halo"},{"id":<Minecraft (Main Theme)>},{"id":<Halo Theme>},{"id":<Song of Storms>,"game":""},7,null]}`, "named after their game: 1 of 4", []int64{301}},
+		{`{"english":[{"id":<Halo Theme>,"game":"Ha"},{"id":<Sweden>,"game":"S"},{"id":<Minecraft (Main Theme)>,"game":"Mine"}]}`, "named after their game: 0 of 4", nil},
+		{`not JSON`, "by script instead: no usable reply", []int64{301, 302, 303, 304}},
+	} {
+		clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+		logs := &syncBuffer{}
+		d := newFakeDeezer(t)
+		d.mu.Lock()
+		d.charts["pl4380597982"] = gameTracks
+		d.mu.Unlock()
+		c := connect(t, testServer(t, t.TempDir(), clk, logs, d.srv.URL))
+		var tokens int
+		c.judge = func(params json.RawMessage) string {
+			var p struct {
+				MaxTokens int `json:"maxTokens"`
+				sampleRequest
+			}
+			json.Unmarshal(params, &p)
+			tokens = p.MaxTokens
+			var items []struct {
+				ID    int    `json:"id"`
+				Title string `json:"title"`
+			}
+			json.Unmarshal([]byte(p.Messages[0].Content.Text), &items)
+			reply := tc.reply // the songs are shuffled: their ids by title
+			for _, it := range items {
+				reply = strings.ReplaceAll(reply, "<"+it.Title+">", strconv.Itoa(it.ID))
+			}
+			return reply
+		}
+		caps := map[string]any{"experimental": map[string]any{vendor + "addon": map[string]any{"version": 1, "watchReplies": true}}, "sampling": map[string]any{}}
+		c.result("initialize", map[string]any{"protocolVersion": protocolVersion, "capabilities": caps}, new(initializeResult))
+		c.send(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+		c.result("resources/subscribe", uriParams{outboxURI}, new(struct{}))
+		dm := from(clk, chat, alice)
+		dm.Group = false
+		c.song("games 2", dm)
+		waitFor(t, c.s, "the songs chosen for "+tc.reply, func() bool {
+			g := c.s.games[chat]
+			return strings.Contains(logs.String(), tc.log) && (g == nil || g.Post != "")
+		})
+		c.s.mu.Lock()
+		var got []int64
+		if g := c.s.games[chat]; g != nil {
+			for _, s := range append(slices.Clone(g.Songs), g.Pool...) {
+				got = append(got, s.ID)
+				if wantGame := tc.log == "named after their game: 1 of 4"; (s.Game != "") != wantGame {
+					t.Errorf("%s: %s has game %q", tc.reply, s.Title, s.Game)
+				}
+			}
+		}
+		c.s.mu.Unlock()
+		if len(got) == 0 != (len(tc.want) == 0) || slices.ContainsFunc(got, func(id int64) bool { return !slices.Contains(tc.want, id) }) { // the first may be dropped, if its clip fails
+			t.Errorf("%s: songs %v, want %v", tc.reply, got, tc.want)
+		}
+		if tokens < judgeTokens {
+			t.Errorf("%s: max tokens %d", tc.reply, tokens)
+		}
 	}
 }

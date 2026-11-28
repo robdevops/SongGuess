@@ -133,7 +133,8 @@ func mark(reply string, t track) (title, artist bool) {
 	if title && artist {
 		return true, true
 	}
-	both := longest(titles) + longest(artists) + 4
+	t.Game = "" // the limit is the song's own words: a long game's name doesn't let more guesses in
+	both := longest(titleNames(t)) + longest(artists) + 4
 	if matchesWithin(reply, titles, both) && matchesWithin(reply, artists, both) {
 		return true, true
 	}
