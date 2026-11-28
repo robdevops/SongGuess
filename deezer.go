@@ -22,6 +22,7 @@ type track struct {
 	Artist  string `json:"artist"`
 	Cover   string `json:"cover,omitempty"` // album.cover_medium, a JPEG
 	Preview string `json:"preview"`         // a 30-second MP3
+	Game    string `json:"game,omitempty"`  // for /song games: the video game, named in the title or artist
 }
 
 // genre is one of Deezer's genres, whose chart /song <genre> plays.

@@ -83,9 +83,10 @@ func stripVersion(s string) string {
 	return t
 }
 
-// titleNames are the forms of t's title an answer may give.
+// titleNames are the forms of t's title an answer may give; for a video
+// game's track, its game's name too.
 func titleNames(t track) []string {
-	return unique(stripVersion(cmp.Or(t.Short, t.Title)), stripVersion(t.Title))
+	return unique(stripVersion(cmp.Or(t.Short, t.Title)), stripVersion(t.Title), t.Game)
 }
 
 // artistNames are the names an answer may give for t's artist: the whole

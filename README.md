@@ -48,7 +48,9 @@ scoreboard.
   answer.
 - **Answer.** In a group, reply to the song's message. Name the title, the
   artist, or both, such as `Bohemian Rhapsody by Queen`. Your last answer
-  before time is up counts.
+  before time is up counts. In `/song games`, naming the game counts as the
+  title: with the bot's model, it plays only tracks whose title or artist
+  names their game, and the reveal names it (🎮).
 - **Points.** 10 for the title and 5 for the artist. The first player to
   get either gets 5 more, marked ⚡.
 - **Early end.** A song ends as soon as every player has answered.

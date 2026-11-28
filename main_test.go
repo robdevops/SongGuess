@@ -1584,7 +1584,7 @@ func TestJudge(t *testing.T) {
 	clk.Advance(settle)
 	waitFor(t, c.s, "the reveal", func() bool { g := c.s.games[chat]; return g == nil || g.Current == 1 })
 	mu.Lock()
-	if len(asked) != 1 || !strings.Contains(asked[0], `"answers":[{"id":1,"text":"something misspelt"},{"id":2,"text":"`) {
+	if len(asked) != 1 || !strings.Contains(asked[0], `"answers":[{"id":1,"text":"something misspelt"},{"id":2,"text":"`) || strings.Contains(asked[0], `"game"`) {
 		t.Errorf("asked %q", asked)
 	}
 	mu.Unlock()
@@ -1595,7 +1595,7 @@ func TestJudge(t *testing.T) {
 			reveal = o.Text
 		}
 	}
-	if !strings.Contains(reveal, "Title: {u_bob} ⚡") || !strings.Contains(reveal, "Artist: {u_bob}") || strings.Contains(reveal, "{u_alice}") {
+	if !strings.Contains(reveal, "Title: {u_bob} ⚡") || !strings.Contains(reveal, "Artist: {u_bob}") || strings.Contains(reveal, "{u_alice}") || strings.Contains(reveal, "🎮") {
 		t.Errorf("reveal %q", reveal)
 	}
 	for _, secret := range []string{"misspelt", song.Title} {
@@ -1695,6 +1695,136 @@ func TestGamesSource(t *testing.T) {
 	}
 	if !slices.Contains(d.fetched(), "/playlist/4380597982/tracks?limit=100") || slices.Contains(d.fetched(), "/chart/173/tracks?limit=100") {
 		t.Errorf("requests %v", d.fetched())
+	}
+}
+
+// gameTracks are video game tracks: two name their game, two don't.
+var gameTracks = []track{
+	{ID: 301, Title: "Halo Theme", Artist: "Martin O'Donnell"},
+	{ID: 302, Title: "Sweden", Artist: "C418"},
+	{ID: 303, Title: "Minecraft (Main Theme)", Short: "Minecraft", Artist: "C418"},
+	{ID: 304, Title: "Song of Storms", Artist: "Koji Kondo"},
+}
+
+// gameOf is the fake model's game for each of gameTracks.
+var gameOf = map[string]string{"Halo Theme": "Halo", "Sweden": "Minecraft", "Minecraft (Main Theme)": "Minecraft", "Song of Storms": "The Legend of Zelda: Ocarina of Time"}
+
+// With the model, /song games keeps only tracks whose title or artist
+// names their game, which the model names; the game counts as the title,
+// the judge is told it, and the reveal names it.
+func TestGamesNamed(t *testing.T) {
+	clk := &fakeClock{now: time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)}
+	logs := &syncBuffer{}
+	d := newFakeDeezer(t)
+	d.mu.Lock()
+	d.charts["pl4380597982"] = gameTracks
+	d.mu.Unlock()
+	c := connect(t, testServer(t, t.TempDir(), clk, logs, d.srv.URL))
+	var mu sync.Mutex
+	var asked []string
+	c.judge = func(params json.RawMessage) string {
+		var p sampleRequest
+		json.Unmarshal(params, &p)
+		if strings.Contains(p.SystemPrompt, "video game music") { // choosing the songs: each with its game
+			var items []struct {
+				ID    int    `json:"id"`
+				Title string `json:"title"`
+			}
+			json.Unmarshal([]byte(p.Messages[0].Content.Text), &items)
+			var out []map[string]any
+			for _, it := range items {
+				out = append(out, map[string]any{"id": it.ID, "game": gameOf[it.Title]})
+			}
+			b, _ := json.Marshal(map[string]any{"english": out})
+			return string(b)
+		}
+		mu.Lock()
+		asked = append(asked, p.Messages[0].Content.Text)
+		mu.Unlock()
+		return `{"answers":[{"id":1,"title":true,"artist":false}]}`
+	}
+	caps := map[string]any{"experimental": map[string]any{vendor + "addon": map[string]any{"version": 1, "watchReplies": true}}, "sampling": map[string]any{}}
+	c.result("initialize", map[string]any{"protocolVersion": protocolVersion, "capabilities": caps}, new(initializeResult))
+	c.send(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	c.result("resources/subscribe", uriParams{outboxURI}, new(struct{}))
+	dm := from(clk, chat, alice)
+	dm.Group = false
+	c.song("games 2", dm)
+	waitFor(t, c.s, "song 1", func() bool { g := c.s.games[chat]; return g != nil && g.Post != "" })
+	c.s.mu.Lock()
+	g := c.s.games[chat]
+	var ids []int64
+	for _, s := range append(slices.Clone(g.Songs), g.Pool...) {
+		ids = append(ids, s.ID)
+		if s.Game != gameOf[s.Title] {
+			t.Errorf("%s: game %q", s.Title, s.Game)
+		}
+	}
+	song := g.Songs[0]
+	c.s.mu.Unlock()
+	if len(ids) == 0 || slices.ContainsFunc(ids, func(id int64) bool { return id != 301 && id != 303 }) {
+		t.Errorf("songs %v", ids)
+	}
+	if !strings.Contains(logs.String(), "songs of video games named after their game: 2 of 4") {
+		t.Errorf("log %q", logs.String())
+	}
+	c.reply(song.Game, dm)
+	clk.Advance(settle)
+	waitFor(t, c.s, "the reveal", func() bool { g := c.s.games[chat]; return g == nil || g.Current == 1 })
+	mu.Lock()
+	if len(asked) != 1 || !strings.Contains(asked[0], `"game":"`+song.Game+`"`) {
+		t.Errorf("asked %q", asked)
+	}
+	mu.Unlock()
+	var reveal string
+	for _, o := range c.outbox("0").Ops {
+		if o.ReplyTo != "" {
+			reveal = o.Text
+		}
+	}
+	if !strings.Contains(reveal, "— "+song.Artist+" · 🎮 "+song.Game+"\n") || !strings.Contains(reveal, "Title: {u_alice} ⚡") {
+		t.Errorf("reveal %q", reveal)
+	}
+	for _, secret := range []string{"Sweden", "Halo Theme"} {
+		if strings.Contains(logs.String(), secret) {
+			t.Errorf("the log holds %q", secret)
+		}
+	}
+}
+
+// A game's name scores the title, without the model too; a track without
+// a game is marked as before; saved tracks keep their game, and ones saved
+// before games had one load.
+func TestGameAnswers(t *testing.T) {
+	sweden := track{Title: "Sweden", Artist: "C418", Game: "Minecraft"}
+	if title, artist := mark("minecraft", sweden); !title || artist {
+		t.Errorf("the game: %v %v", title, artist)
+	}
+	if title, artist := mark("minecraft by c418", sweden); !title || !artist {
+		t.Errorf("the game and artist: %v %v", title, artist)
+	}
+	sweden.Game = ""
+	if title, _ := mark("minecraft", sweden); title {
+		t.Error("a game without one")
+	}
+	if got := titleNames(sweden); !slices.Equal(got, []string{"Sweden"}) {
+		t.Errorf("titleNames %v", got)
+	}
+	g := &game{Songs: []track{sweden}, Answers: map[string]answer{alice: {Text: "x"}}}
+	if req := judgeRequest(g); strings.Contains(req.Messages[0].Content.Text, `"game"`) {
+		t.Errorf("a game in %s", req.Messages[0].Content.Text)
+	}
+	var old track
+	if err := json.Unmarshal([]byte(`{"id":1,"title":"Sweden","artist":"C418","preview":"p"}`), &old); err != nil || old.Game != "" || old.Title != "Sweden" {
+		t.Errorf("old track %+v %v", old, err)
+	}
+	b, _ := json.Marshal(track{ID: 1, Title: "Sweden", Game: "Minecraft"})
+	var back track
+	if json.Unmarshal(b, &back); back.Game != "Minecraft" {
+		t.Errorf("round trip %s", b)
+	}
+	if b, _ := json.Marshal(old); strings.Contains(string(b), "game") {
+		t.Errorf("no game saved as %s", b)
 	}
 }
 

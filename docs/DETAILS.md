@@ -23,6 +23,14 @@ music, and holds no API key: Deezer's public API needs none.
   Classics, League of Legends), as Deezer's Films/Games chart is mostly film
   songs; with the `model` permission, the model also keeps only game music,
   instrumental or sung mainly in English, even with `SONGS_ANY_LANGUAGE`.
+  The model also names each track's game, and only tracks whose title or
+  artist holds that name (as answers are compared: case, accents,
+  punctuation and "the" aside) are played, so naming the game is always a
+  right answer: it counts as the title (10 points), in the fuzzy match
+  and for the model's judging, and the reveal names it, as in `🎮 Minecraft`.
+  Without the model, or if its reply can't be used, game names aren't
+  checked: tracks are kept as for other genres, and only their title and
+  artist count.
 - **Songs in English only**, unless `SONGS_ANY_LANGUAGE` is `true`. Deezer
   doesn't say a song's language, so when a game starts the bot's model
   picks the English ones from the chart; without the `model` permission,

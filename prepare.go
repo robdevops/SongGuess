@@ -202,6 +202,9 @@ func (s *server) prunePlayed(now time.Time) {
 // the bot's model decides, as Deezer doesn't say a track's language; without
 // it, or if it fails, only tracks whose title or artist is in a script other
 // than Latin are dropped. With SONGS_ANY_LANGUAGE, tracks as they are.
+// For games, the model keeps only video game music and names each track's
+// game, and only tracks whose title or artist names their game are kept,
+// with it, so naming the game is always a right answer.
 func (s *server) english(ctx context.Context, chat string, tracks []track, games bool) []track {
 	if s.cfg.Anyway && !games || len(tracks) == 0 {
 		return tracks
@@ -225,7 +228,7 @@ func (s *server) english(ctx context.Context, chat string, tracks []track, games
 	defer cancel()
 	prompt := `You know popular music. For each track below, decide whether its lyrics are sung mainly in English. An instrumental, or a song mainly in another language, is not. Reply with JSON only, no other text: {"english":[1,3]}, the ids of the English ones.`
 	if games {
-		prompt = `You know video game music. For each track below, decide whether it is music from a video game: a game's soundtrack, theme or score, or a song made for a game. Music from a film or TV show, or a song merely used in a trailer, is not. Instrumentals are fine; a song with lyrics must be sung mainly in English. Reply with JSON only, no other text: {"english":[1,3]}, the ids of the tracks that qualify.`
+		prompt = `You know video game music. For each track below, decide whether it is music from a video game: a game's soundtrack, theme or score, or a song made for a game. Music from a film or TV show, or a song merely used in a trailer, is not. Instrumentals are fine; a song with lyrics must be sung mainly in English. For each track that qualifies, name its game as players know it, as short as is still clear (Minecraft, Halo, Final Fantasy VII). Reply with JSON only, no other text: {"english":[{"id":1,"game":"Minecraft"},{"id":3,"game":"Halo"}]}, the tracks that qualify, by id, each with its game.`
 	}
 	res, err := s.srv.Sample(ctx, chat, addon.SampleRequest{
 		SystemPrompt: prompt,
@@ -239,20 +242,67 @@ func (s *server) english(ctx context.Context, chat string, tracks []track, games
 	text := res.Content.Text
 	i, j := strings.Index(text, "{"), strings.LastIndex(text, "}")
 	var r struct {
-		English []int `json:"english"`
+		English []json.RawMessage `json:"english"`
 	}
 	if i < 0 || j < i || json.Unmarshal([]byte(text[i:j+1]), &r) != nil {
 		s.log.Printf("choosing English songs failed, by script instead: no usable reply")
 		return latin
 	}
+	kept := map[int]string{} // by id: its game, if named
+	anyGame := false
+	for _, e := range r.English {
+		var id int
+		var named struct {
+			ID   int    `json:"id"`
+			Game string `json:"game"`
+		}
+		switch {
+		case json.Unmarshal(e, &id) == nil: // the reply as it was: ids alone
+			kept[id] = ""
+		case json.Unmarshal(e, &named) == nil:
+			kept[named.ID] = strings.TrimSpace(named.Game)
+			anyGame = anyGame || kept[named.ID] != ""
+		}
+	}
+	if games && len(kept) > 0 && !anyGame { // no game named: they can't be checked
+		s.log.Printf("choosing English songs failed, by script instead: no games named")
+		return latin
+	}
 	var out []track
 	for k, t := range latin {
-		if slices.Contains(r.English, k+1) {
-			out = append(out, t)
+		game, ok := kept[k+1]
+		if !ok {
+			continue
 		}
+		if games {
+			if !namesGame(t, game) {
+				continue
+			}
+			t.Game = game
+		}
+		out = append(out, t)
+	}
+	if games {
+		s.log.Printf("songs of video games named after their game: %d of %d", len(out), len(latin))
+		return out
 	}
 	s.log.Printf("songs in English: %d of %d", len(out), len(latin))
 	return out
+}
+
+// namesGame reports whether t's title or artist holds game's name, as
+// whole words, normalised: so naming the game is part of naming the song.
+func namesGame(t track, game string) bool {
+	g := normalize(game)
+	if g == "" {
+		return false
+	}
+	for _, s := range []string{t.Title, t.Short, t.Artist} {
+		if strings.Contains(" "+normalize(s)+" ", " "+g+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 // isLatin reports whether every letter of s is in the Latin script.
