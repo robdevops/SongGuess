@@ -2459,22 +2459,33 @@ func (c *client) joined() []string {
 	return slices.Clone(c.s.games[chat].Joined)
 }
 
-// ✅ (Ready): anyone's, the starter's too; each join, by a press or a
-// reaction, and each leave, replaces the row with the new count, ▶️
+// ✅ (Ready): anyone's, the starter's too, and a toggle: a second press
+// leaves; each join, by a press or a reaction, and each leave, replaces the row with the new count, ▶️
 // in it from 2; no countdown starts the game; under an older lobby, after
 // the start and after the end, a press answers as the other buttons do.
 func TestPressReady(t *testing.T) {
 	clk, c, _, _, r := buttonLobby(t, false)
 	id := r.Meta.Watch.ID
-	if got := c.press("ready:"+id, from(clk, chat, bob)); got != "You're in: 1 joined." {
+	if got := c.press("ready:"+id, from(clk, chat, bob)); got != "You're in: 1 ready." {
 		t.Errorf("bob's press: %q", got)
 	}
 	rows, cur := c.buttonsOps("0", id)
 	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2)) {
 		t.Fatalf("after bob: %+v", rows)
 	}
-	if got := c.press("ready:"+id, from(clk, chat, bob)); got != alreadyIn {
+	if got := c.press("ready:"+id, from(clk, chat, bob)); got != "You're out: 0 ready." { // ✅ toggles
 		t.Errorf("bob again: %q", got)
+	}
+	rows, cur = c.buttonsOps(cur, id)
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 0, 2)) || len(c.joined()) != 0 {
+		t.Fatalf("after bob's unready: %+v %v", rows, c.joined())
+	}
+	if got := c.press("ready:"+id, from(clk, chat, bob)); got != "You're in: 1 ready." {
+		t.Errorf("bob a third time: %q", got)
+	}
+	rows, cur = c.buttonsOps(cur, id)
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2)) {
+		t.Fatalf("after bob's ready again: %+v", rows)
 	}
 	c.react(false, from(clk, chat, bob)) // a reaction after it is no second join
 	if got := c.joined(); !slices.Equal(got, []string{bob}) {
@@ -2487,7 +2498,7 @@ func TestPressReady(t *testing.T) {
 		t.Errorf("ops without a change: %+v", rows)
 	}
 	clk.Advance(10 * time.Second)
-	if got := c.press("ready:"+id, from(clk, chat, alice)); got != "You're in: 2 joined." {
+	if got := c.press("ready:"+id, from(clk, chat, alice)); got != "You're in: 2 ready." {
 		t.Errorf("alice's press: %q", got)
 	}
 	rows, cur = c.buttonsOps(cur, id)
@@ -2499,6 +2510,27 @@ func TestPressReady(t *testing.T) {
 	c.s.mu.Unlock()
 	if !strings.Contains(string(data), `"joined":["`+bob+`","`+alice+`"]`) {
 		t.Errorf("not saved: %s", data)
+	}
+	// The starter may unready too: at 1, ▶️ is gone; a press brings it back.
+	if got := c.press("ready:"+id, from(clk, chat, alice)); got != "You're out: 1 ready." {
+		t.Errorf("alice's unready: %q", got)
+	}
+	rows, cur = c.buttonsOps(cur, id)
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 1, 2)) {
+		t.Fatalf("after alice's unready: %+v", rows)
+	}
+	c.s.mu.Lock()
+	data, _ = json.Marshal(c.s.games[chat])
+	c.s.mu.Unlock()
+	if !strings.Contains(string(data), `"joined":["`+bob+`"]`) {
+		t.Errorf("unready not saved: %s", data)
+	}
+	if got := c.press("ready:"+id, from(clk, chat, alice)); got != "You're in: 2 ready." {
+		t.Errorf("alice's ready again: %q", got)
+	}
+	rows, cur = c.buttonsOps(cur, id)
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], lobbyRow(id, 2, 2)) {
+		t.Fatalf("after alice's ready again: %+v", rows)
 	}
 	clk.Advance(lobbyMax - 11*time.Second) // no countdown
 	if p := c.outbox(cur); songPosts(p.Ops) != 0 || len(p.Ops) != 0 {
@@ -2789,7 +2821,7 @@ func TestPressReadyRaces(t *testing.T) {
 		go func() { defer wg.Done(); c.press("start:"+id, from(clk, chat, alice)) }()
 		got := c.press("ready:"+id, from(clk, chat, "u_carol"))
 		wg.Wait()
-		if got != "You're in: 3 joined." && got != alreadyBegun {
+		if got != "You're in: 3 ready." && got != alreadyBegun {
 			t.Errorf("press %q", got)
 		}
 		if p := c.outbox("0"); songPosts(p.Ops) != 1 {

@@ -45,7 +45,6 @@ const (
 	startingNow   = "Starting!"
 	needPlayers   = "Waiting for at least 2 players: react to join."
 	needReady     = "Waiting for at least 2 players: press ✅ to join."
-	alreadyIn     = "You're already in."
 	cancelled     = "Cancelled."
 	lobbyOff      = "The song quiz is off."
 	waitLonger    = "Starts 30s later."
@@ -961,7 +960,7 @@ func (s *server) reacted(c *addon.Context, removed bool) addon.Result {
 	case !removed && !in:
 		s.joinLocked(g, c.Sender, s.clock.Now())
 	case removed && in:
-		g.Joined = slices.DeleteFunc(g.Joined, func(u string) bool { return u == c.Sender })
+		s.leaveLocked(g, c.Sender)
 	default:
 		s.mu.Unlock()
 		return addon.Text("Noted.")
@@ -984,6 +983,13 @@ func (s *server) joinLocked(g *game, u string, now time.Time) bool {
 	g.Joined = append(g.Joined, u)
 	g.LastJoin = now
 	return true
+}
+
+// leaveLocked has u leave g's lobby, as a reaction taken back or a second
+// press of ✅ does. Its caller re-arms the lobby's timer, re-sends its row
+// and saves. s.mu is held.
+func (s *server) leaveLocked(g *game, u string) {
+	g.Joined = slices.DeleteFunc(g.Joined, func(v string) bool { return v == u })
 }
 
 // armLobby sets g's lobby timer: with enough players, to start lobbyWait
@@ -1055,7 +1061,7 @@ func (s *server) beginLocked(g *game, now time.Time) {
 	s.tryPost(g)
 }
 
-// lobbyAction is anyone's ✅ (ready), or the starter's songs toggle (t1),
+// lobbyAction is anyone's ✅ (ready, or unready if in), or the starter's songs toggle (t1),
 // ▶️ (start) or ✖️ (cancel), pressed under the lobby of the game id, or an
 // older lobby's ⏱ +30s (wait); or, with id "", /song start or /song wait
 // typed in its chat. It answers with the press's pop-up, or the
@@ -1084,14 +1090,15 @@ func (s *server) lobbyAction(c *addon.Context, action, id string) string {
 	now := s.clock.Now()
 	var text string
 	switch action {
-	case "ready": // anyone's join, as a reaction is
+	case "ready": // anyone's join, or leave if in, as a reaction is
+		text = "You're in: %d ready."
 		if !s.joinLocked(g, c.Sender, now) {
-			s.mu.Unlock()
-			return alreadyIn
+			s.leaveLocked(g, c.Sender)
+			text = "You're out: %d ready."
 		}
 		s.armLobby(g)
 		s.showLobby(g, false)
-		text = fmt.Sprintf("You're in: %d joined.", len(g.Joined))
+		text = fmt.Sprintf(text, len(g.Joined))
 	case "t1":
 		if !g.Buttons {
 			s.mu.Unlock()

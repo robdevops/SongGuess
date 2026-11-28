@@ -37,8 +37,10 @@ music, and holds no API key: Deezer's public API needs none.
   only songs titled in another script (such as Korean or Japanese) are
   left out.
 - **Joining.** A press of ✅ and a reaction are the same join, each
-  player's own, saved alike. Taking a reaction back leaves the lobby,
-  however you joined. Where the lobby has buttons, each join or leave
+  player's own, saved alike. Taking a reaction back, or pressing ✅
+  again, leaves the lobby, however you joined; the starter may leave too,
+  and their ▶️ still counts as their join. The pop-ups read "You're in:
+  N ready." and "You're out: N ready.". Where the lobby has buttons, each join or leave
   replaces its row (a `buttons` op), with the new count in ✅ and
   ▶️ from 2 players. Those who
   joined are the players every song waits for; anyone may still answer.
@@ -243,7 +245,7 @@ their cancellation, and the outbox the bot reads. The game adds:
   lobby called off for want of players (or, with buttons, unstarted after
   15 minutes) posts why, then an `unwatch`.
 - Where the bot offers `buttons`, the lobby's answer has one row,
-  `onPress: "song_press"`: `✅ N` (Ready, `ready:<id>`, anyone's),
+  `onPress: "song_press"`: `✅ N` (Ready, `ready:<id>`, anyone's, a toggle),
   `Songs: N` (`t1:<id>`), `▶️` (Start, `start:<id>`, shown from 2
   players) and `✖️` (Cancel, `cancel:<id>`), `<id>` the watch's; an
   older lobby's `Clip` toggle (`t2:<id>`) answers "That button is gone."

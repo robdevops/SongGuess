@@ -31,8 +31,9 @@ scoreboard.
 - **Lobby buttons.** Where the bot's network shows buttons (Telegram,
   Discord, Slack), the lobby message has one row:
   `✅ N` · `Songs: N` · `▶️` · `✖️`.
-  Press ✅ to join: it's anyone's, and shows how many have joined (a
-  pop-up says so, or that you're already in). The rest are the player who
+  Press ✅ to join: it's anyone's, and shows how many are ready (a
+  pop-up says "You're in: N ready."). It toggles: press it again to
+  leave before the game starts ("You're out: N ready."). The rest are the player who
   started it's: `Songs` switches between what the game was opened with
   (`SONGS_SONGS`, or what `/song` was typed with) and double that, up to
   10 songs (at the most already, a press says "Already the most."); the
