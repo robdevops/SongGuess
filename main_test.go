@@ -2607,6 +2607,38 @@ func TestPressTogglePreparing(t *testing.T) {
 	}
 }
 
+// A run that reaches its deadline just as a toggle chooses the songs again
+// leaves the new run alone.
+func TestToggleAtDeadline(t *testing.T) {
+	clk, c, d, logs, r := buttonLobby(t, true)
+	id := r.Meta.Watch.ID
+	d.asked(t)
+	c.s.mu.Lock()
+	run, g := c.s.gathering[id], c.s.games[chat]
+	src, clip := g.source(), g.Clip
+	c.s.mu.Unlock()
+	if got := c.press("t1:"+id, from(clk, chat, alice)); got != "Songs: 4" {
+		t.Fatalf("t1: %q", got)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	c.s.gathered(ctx, run, chat, id, src, 2, clip) // the old run, waking at its deadline
+	c.s.mu.Lock()
+	_, running := c.s.gathering[id]
+	c.s.mu.Unlock()
+	if g := c.game(); !g.Preparing || g.Asked != 4 || !running {
+		t.Fatalf("game %+v, running %v", g, running)
+	}
+	if strings.Contains(logs.String(), "no songs") {
+		t.Fatalf("called off: %s", logs)
+	}
+	d.release()
+	c.ready()
+	if g := c.game(); g.Preparing || g.Count != 4 || g.Gathered != 4 {
+		t.Errorf("game %+v", g)
+	}
+}
+
 // ✅ presses racing ▶️ start the game once, with every join
 // made before it among its players.
 func TestPressReadyRaces(t *testing.T) {

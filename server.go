@@ -37,17 +37,17 @@ type server struct {
 	rand   *mrand.Rand
 
 	mu        sync.Mutex
-	games     map[string]*game              // by chat
-	timers    map[string]stopper            // each game's reveal, by chat
-	asks      map[string]stopper            // each game's next song, posted after the gap, by chat
-	warns     map[string]stopper            // each game's ⏰ on its open song, warnBefore its deadline, by chat
-	gap       time.Duration                 // between a song's reveal and the next song: gapTime, or 0 in most tests
-	starting  map[string]bool               // chats whose game is being set up
-	media     map[string]map[int]media      // the clips and covers made ready, by game, then song
-	preparing map[string]bool               // games whose next song is being made ready
-	gathering map[string]context.CancelFunc // games whose songs are being chosen, to stop it
-	scores    map[string][]score            // by chat, the last scoreDays days
-	played    map[string][]stamp            // by chat, the tracks of the last playedDays days
+	games     map[string]*game         // by chat
+	timers    map[string]stopper       // each game's reveal, by chat
+	asks      map[string]stopper       // each game's next song, posted after the gap, by chat
+	warns     map[string]stopper       // each game's ⏰ on its open song, warnBefore its deadline, by chat
+	gap       time.Duration            // between a song's reveal and the next song: gapTime, or 0 in most tests
+	starting  map[string]bool          // chats whose game is being set up
+	media     map[string]map[int]media // the clips and covers made ready, by game, then song
+	preparing map[string]bool          // games whose next song is being made ready
+	gathering map[string]*gatherRun    // games whose songs are being chosen, to stop it
+	scores    map[string][]score       // by chat, the last scoreDays days
+	played    map[string][]stamp       // by chat, the tracks of the last playedDays days
 
 	saveMu sync.Mutex // one save at a time, so the last one written is the newest
 }
@@ -185,7 +185,7 @@ func newServer(cfg config, clk clock, rnd *mrand.Rand, client *http.Client, logg
 		starting:  map[string]bool{},
 		media:     map[string]map[int]media{},
 		preparing: map[string]bool{},
-		gathering: map[string]context.CancelFunc{},
+		gathering: map[string]*gatherRun{},
 		scores:    map[string][]score{},
 		played:    map[string][]stamp{},
 	}

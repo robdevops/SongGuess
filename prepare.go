@@ -363,26 +363,30 @@ func (s *server) gather(ctx context.Context, chat string, src source, n int, len
 	return t, m, pool, ""
 }
 
+// gatherRun is one choosing of a game's songs, told apart from a later one.
+type gatherRun struct{ cancel context.CancelFunc }
+
 // gatherGame starts choosing g's songs in the background, for at most
 // prepMax, or until g ends or the server stops. s.mu is held.
 func (s *server) gatherGame(g *game) {
 	ctx, cancel := context.WithTimeout(s.ctx, prepMax)
 	s.stopGathering(g.ID)
-	s.gathering[g.ID] = cancel
+	run := &gatherRun{cancel}
+	s.gathering[g.ID] = run
 	chat, id, src, n, length := g.Chat, g.ID, g.source(), g.Asked, g.Clip
 	s.bg.Add(1)
 	go func() {
 		defer s.bg.Done()
 		defer cancel()
-		s.gathered(ctx, chat, id, src, n, length)
+		s.gathered(ctx, run, chat, id, src, n, length)
 	}()
 }
 
 // stopGathering stops choosing the songs of the game id, if it is. s.mu
 // is held.
 func (s *server) stopGathering(id string) {
-	if cancel := s.gathering[id]; cancel != nil {
-		cancel()
+	if run := s.gathering[id]; run != nil {
+		run.cancel()
 		delete(s.gathering, id)
 	}
 }
@@ -392,7 +396,7 @@ func (s *server) stopGathering(id string) {
 // lobby is over; if there are none, it calls the game off, saying why. A
 // game that ended meanwhile is left alone, and one the server stopped
 // during is chosen again after the restart.
-func (s *server) gathered(ctx context.Context, chat, id string, src source, n int, length time.Duration) {
+func (s *server) gathered(ctx context.Context, run *gatherRun, chat, id string, src source, n int, length time.Duration) {
 	var t track
 	var m media
 	var pool []track
@@ -405,7 +409,7 @@ func (s *server) gathered(ctx context.Context, chat, id string, src source, n in
 	}
 	s.mu.Lock()
 	g := s.games[chat]
-	if g == nil || g.ID != id || !g.Preparing || errors.Is(ctx.Err(), context.Canceled) { // ended, or chosen again after a toggle
+	if g == nil || g.ID != id || !g.Preparing || s.gathering[id] != run { // ended, or chosen again after a toggle
 		s.mu.Unlock()
 		return
 	}
